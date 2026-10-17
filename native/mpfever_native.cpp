@@ -193,6 +193,7 @@ struct Site {
 
 #include "sites_gen.h"
 #include "sites20c.h"
+#include "sites_gog.h"
 enum { RULE_COUNT = 0, RULE_SIM = 1, RULE_UI = 2, RULE_NOTSIM = 3, RULE_SIMTHREAD = 4, RULE_UIOBJ = 0x10 };
 static const int NSITES = (int)(sizeof(SITES20C) / sizeof(SITES20C[0]));
 static volatile i64 g_siteCount[64][4];    // per site: interface, simulation, other thread; [3] interface-object readings moved
@@ -330,20 +331,42 @@ static const u32 UI_SITES_40420[] = {
     0x5bf08d,   // UI::TrackModifier::Build
     0x28a3024, 0x28a3871,   // entity window builtins
 };
+// GOG build (stamp 0x6ab3eec7, a few days before 40408; same functions, found again with the call graph: the distances between
+// the sites of one function are those of 40408)
+static const u32 UI_SITES_GOG[] = {
+    0x4d482f,   // UI::Bulldozer::Apply
+    0x51c39c,   // UI::ConstructionBuilder::MousePressed
+    0x529324,   // tool (unnamed)
+    0x538cb5, 0x539419, 0x53959d,   // UI::LaneModifier::Apply
+    0x543d5a,   // UI::ModuleBuilder::MousePressed
+    0x58a104,   // UI::StreetBuilder::UpdateEngine
+    0x59571d,   // UI::StreetTerminalBuilder (stops, signals, waypoints)
+    0x5bfecd,   // UI::TrackModifier::Build
+    0x289f8c4, 0x28a0111,   // entity window builtins
+};
 static const u32* UI_ADD_SITES = UI_SITES_40408;
 static int UI_ADD_N = (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0]));
 
 // The engine functions the native module hooks, per game build (TransportFever3.exe's link timestamp). Any other build:
 // the hooks stay off (the main menu page and the script pool patch are found by their code instead, see below).
+// The companies mode needs the rest (repl ... words): 0 / null where a build does not have them (words: null = the rvas of sites20c.h).
 struct BuildAddrs {
     u32 stamp;
     u32 add, move, dtor, handleDtor, apply, swap, sync, preIter, lua, pool, loopRet;
     const u32* sites; int nSites;
+    u32 repl, replLoop, moneyCheck, lines, makeSeed;
+    const u32* words;
 };
 static const BuildAddrs BUILDS[] = {
-    { 0x6ab69fe5, 0x9d29c0, 0x9cedb0, 0x9ceff0, 0x30393d0, 0x9e1c10, 0x9d2d20, 0x11f650, 0x157860, 0x2fbdf70, 0xaaec2c, 0x11eb9b, UI_SITES_40408, (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0])) },   // 40408
-    { 0x6ac50427, 0x9d4040, 0x9d0430, 0x9d0670, 0x3040c90, 0x9e33b0, 0x9d43a0, 0x11f690, 0x1578a0, 0x2fc58c0, 0xab00fc, 0x11ebdb, UI_SITES_40420, (int)(sizeof(UI_SITES_40420) / sizeof(UI_SITES_40420[0])) },   // 40420
+    { 0x6ab69fe5, 0x9d29c0, 0x9cedb0, 0x9ceff0, 0x30393d0, 0x9e1c10, 0x9d2d20, 0x11f650, 0x157860, 0x2fbdf70, 0xaaec2c, 0x11eb9b, UI_SITES_40408, (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0])),
+      0, 0, 0, 0, 0, 0 },   // 40408
+    { 0x6ac50427, 0x9d4040, 0x9d0430, 0x9d0670, 0x3040c90, 0x9e33b0, 0x9d43a0, 0x11f690, 0x1578a0, 0x2fc58c0, 0xab00fc, 0x11ebdb, UI_SITES_40420, (int)(sizeof(UI_SITES_40420) / sizeof(UI_SITES_40420[0])),
+      0x255e60, 0x11ea9f, 0xccfbd0, 0x7f5c60, 0x2fc8fe0, 0 },   // 40420
+    { 0x6ab3eec7, 0x9d2b70, 0x9cef60, 0x9cf1a0, 0x303b510, 0x9e1de0, 0x9d2ed0, 0x11f990, 0x157ba0, 0x2fbf230, 0xaaedbc, 0x11eedb, UI_SITES_GOG, (int)(sizeof(UI_SITES_GOG) / sizeof(UI_SITES_GOG[0])),
+      0x256120, 0x11ed9f, 0xccf850, 0x7f4020, 0x2fc2950, SITES20C_GOG },   // GOG
 };
+static u32 RVA_MONEYCHECK = 0, RVA_LUA_MAKESEED = 0;
+static const u32* g_wordRvas = 0;
 static bool SelectBuild(u32 stamp);
 static u32 g_knownLua = 0, g_knownPool = 0;
 
@@ -619,7 +642,7 @@ extern "C" u64 SyncDetour(void* a, void* b)
 typedef void* (*LinesF)(void*, void*, void*, void*, void*, u32, void*, void*);
 static LinesF g_linesOrig = 0;
 static const u8 P_LINES[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18, 0x48, 0x89, 0x78, 0x20, 0x55 };
-static u32 RVA_LINES = 0x7f5c60;
+static u32 RVA_LINES = 0;
 static volatile long g_linesShown = 0;
 typedef u64 (*SwapF)(void*, void*);
 static SwapF g_swapOrig = 0;
@@ -1881,8 +1904,10 @@ static bool SelectBuild(u32 stamp)
         if (b.stamp != stamp) continue;
         RVA_ADD = b.add; RVA_CMD_MOVE = b.move; RVA_CMD_DTOR = b.dtor; RVA_HANDLE_DTOR = b.handleDtor; RVA_APPLY = b.apply;
         RVA_SWAP = b.swap; RVA_SYNC = b.sync; RVA_PREITER = b.preIter; RVA_LOOP_RET = b.loopRet;
-        RVA_REPL = (stamp == 0x6ac50427) ? 0x255e60 : 0;      // build 40420 only
-        RVA_REPL_LOOP = (stamp == 0x6ac50427) ? 0x11ea9f : 0;      // return address of the simulation loop's call
+        RVA_REPL = b.repl;
+        RVA_REPL_LOOP = b.replLoop;      // return address of the simulation loop's call
+        RVA_MONEYCHECK = b.moneyCheck; RVA_LINES = b.lines; RVA_LUA_MAKESEED = b.makeSeed;
+        g_wordRvas = b.words;
         UI_ADD_SITES = b.sites; UI_ADD_N = b.nSites;
         g_knownLua = b.lua; g_knownPool = b.pool;
         return true;
@@ -1988,7 +2013,7 @@ static u8* EmitBack(u8* p, u8* back)
 
 static void PatchPlayerReads()
 {
-    if (RVA_REPL != 0x255e60) return;       // build 40420 only (the sites were found there)
+    if (RVA_REPL != 0x255e60) return;       // build 40420 only (the sites were found there; unused: see HookWordReads)
     u8* page = (u8*)VirtualAlloc(0, 4096, 0x3000 /* MEM_COMMIT|MEM_RESERVE */, 0x40 /* PAGE_EXECUTE_READWRITE */);
     if (!page) return;
     int done = 0;
@@ -2132,7 +2157,6 @@ static int RuleOf(u32 rva)
 // made for: the savegame's company, the tools being made when the game loads. A machine playing another company then could not
 // build as soon as the savegame's company was out of money (and could while its own was): off the simulation thread, the
 // savegame's company is replaced by this machine's.
-static const u32 RVA_MONEYCHECK = 0xccfbd0;
 static const u8 P_MONEYCHECK[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0x49, 0x8B, 0xF9 };
 typedef u64 (*MoneyCheckF)(void* world, void* ctx, u32 player, i64 cost);
 static MoneyCheckF g_moneyOrig = 0;
@@ -2202,14 +2226,15 @@ extern "C" void RemoveEntityDetour(void* engine, int entity, u8 flag)
 
 static void HookWordReads()
 {
-    if (RVA_REPL != 0x255e60) return;
+    if (!RVA_REPL) return;
     u8* mem = AllocNear(0x10000);
     if (!mem) { Buf e; e.str("player word: no memory near the game's code, readings not hooked"); LogLine(e); return; }
     u8* stubs = mem;
     int done = 0;
     for (int i = 0; i < NSITES && i < 64; i++) {
-        const Site20c& s = SITES20C[i];
-        u8* site = (u8*)(g_base + s.rva);
+        const Site20c& s = SITES20C[i];          // (its rva names the reading: 40420's; RuleOf is keyed by it)
+        u32 rva = g_wordRvas ? g_wordRvas[i] : s.rva;
+        u8* site = (u8*)(g_base + rva);
         if (memcmp(site, s.bytes, s.len) != 0) continue;
         g_siteRule[i] = (u8)RuleOf(s.rva);
         Asm a{ stubs };
@@ -2362,8 +2387,8 @@ static DWORD WINAPI Init(void*)
     }
     HookWordReads();
     { Buf b; b.str(g_luaSeedFixed ? "Lua string hash seed: fixed (same table order on every game)" : "Lua string hash seed: NOT fixed"); LogLine(b); }
-    if (RVA_REPL == 0x255e60) InstallDetour(RVA_MONEYCHECK, P_MONEYCHECK, sizeof(P_MONEYCHECK), (void*)&MoneyCheckDetour, (void**)&g_moneyOrig);
-    if (RVA_REPL == 0x255e60) InstallDetour(RVA_LINES, P_LINES, sizeof(P_LINES), (void*)&LinesDetour, (void**)&g_linesOrig);
+    if (RVA_MONEYCHECK) InstallDetour(RVA_MONEYCHECK, P_MONEYCHECK, sizeof(P_MONEYCHECK), (void*)&MoneyCheckDetour, (void**)&g_moneyOrig);
+    if (RVA_LINES) InstallDetour(RVA_LINES, P_LINES, sizeof(P_LINES), (void*)&LinesDetour, (void**)&g_linesOrig);
     if (RVA_REPL == 0x255e60 && GetEnvironmentVariableA("MPFEVER_ENTWATCH", 0, 0) > 0) {
         InstallDetour(RVA_ADDENTITY, P_ADDENTITY, sizeof(P_ADDENTITY), (void*)&AddEntityDetour, (void**)&g_addEntOrig);
         InstallDetour(RVA_REMOVEENTITY, P_REMOVEENTITY, sizeof(P_REMOVEENTITY), (void*)&RemoveEntityDetour, (void**)&g_remEntOrig);
@@ -2581,15 +2606,17 @@ extern "C" int LuaLoadDetour(void* L, LuaReader reader, void* data, const char* 
 // Lua state: the order in which pairs() walks a table with string keys then differs from one game to the other, and so
 // does every decision a game script or a construction script takes in such a loop (towns, industries, the lanes of a
 // new industry were numbered differently on two games). makeseed is made to return one constant (MPFEVER_LUASEED=0: not).
-static const u32 RVA_LUA_MAKESEED = 0x2fc8fe0;     // build 40420, only caller lua_newstate (g->seed = makeseed(L))
+// (RVA_LUA_MAKESEED: per build, see BUILDS; only caller lua_newstate (g->seed = makeseed(L)). Bytes 9..12 of the pattern are a
+// RIP-relative offset, different in every build: not compared)
 static const u8 P_LUA_MAKESEED[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B, 0x05, 0x4B, 0x4A, 0xD2, 0x00, 0x48, 0x33, 0xC4,
                                      0x48, 0x89, 0x44, 0x24, 0x48, 0x48, 0x8B, 0xD9, 0x33, 0xC9 };
 static void PatchLuaSeed(uptr base)
 {
     char v[4] = {};
     if (GetEnvironmentVariableA("MPFEVER_LUASEED", v, 3) > 0 && v[0] == '0') return;
+    if (!RVA_LUA_MAKESEED) return;
     u8* f = (u8*)(base + RVA_LUA_MAKESEED);
-    if (memcmp(f, P_LUA_MAKESEED, sizeof(P_LUA_MAKESEED)) != 0) return;
+    if (memcmp(f, P_LUA_MAKESEED, 9) != 0 || memcmp(f + 13, P_LUA_MAKESEED + 13, sizeof(P_LUA_MAKESEED) - 13) != 0) return;
     const u8 code[] = { 0xB8, 0x56, 0x46, 0x50, 0x4D, 0xC3 };    // mov eax, 'MPFV' ; ret
     DWORD prot;
     if (!VirtualProtect(f, sizeof(code), PAGE_EXECUTE_READWRITE, &prot)) return;
