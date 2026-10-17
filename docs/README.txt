@@ -106,7 +106,7 @@ KNOWN LIMITATIONS
 - Trees and plants of the brush are copied (since 0.3.3). Ground PAINT (textures) is not copied
   yet: each game keeps its own paint (it does not cause a resynchronisation).
 - Tested with 2 players. More players should work but are untested.
-- Windows only. Made for the current Steam version of Transport Fever 3 (builds 40408 and 40420).
+- Windows only. Made for Transport Fever 3 on Steam (builds 40408 and 40420) and GOG.
   After a game update, the mod still runs but synchronisation may be worse until
   MPFever is updated.
 - Without port forwarding on the host's box, players need a virtual LAN (Radmin VPN,
@@ -126,11 +126,14 @@ WHAT MPFEVER CHANGES ON YOUR PC
   call of the game unchanged to Windows' own winhttp.dll, and only does something when
   the game was started by MPFever.exe: in a normal solo game it is inactive. It lets
   MPFever synchronise the game's own construction tools precisely.
-- It writes a file steam_appid.txt in the game folder (so that the game can be started
-  directly, several times on one PC).
+- Steam version: it writes a file steam_appid.txt in the game folder (so that the game
+  can be started directly, several times on one PC).
 - It adds the mod to the game's default mod list in settings.lua (a backup is kept as
   settings.lua.bak_mpfever).
 - It installs the mod files in your Transport Fever 3 user mods folder.
+MPFever works with the Steam and the GOG versions of the game. It finds the game by itself;
+otherwise choose TransportFever3.exe with « Game folder: Browse… ». With the GOG version,
+Steam invitations are not available: players join with the host's address.
 MPFever connects to the address you type (or the one of the Steam invitation you accept).
 The only other connection: when you host, it asks api.ipify.org (a public service that
 answers with your public IP address, nothing else is sent) so that the address given to
@@ -149,6 +152,7 @@ Please describe what you did, what you expected and what happened, and attach:
 2. the folders %TEMP%\mpfever\Host-... or Client-... of that session (zip them);
 3. if the game crashed: the newest files of
    C:\Program Files (x86)\Steam\userdata\<your id>\3493540\local\crash_dump\
+   (GOG version: %APPDATA%\Transport Fever 3\crash_dump\)
 
 CREDITS
 -------

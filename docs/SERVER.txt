@@ -48,6 +48,7 @@ SETTING IT UP
    A savegame of another PC works too: copy its .sav file (and the files next to it with
    the same name) into the save folder of the server's Steam account:
        Steam\userdata\<id>\3493540\local\save\
+   (GOG version: %APPDATA%\Transport Fever 3\save\)
    Lower the graphics settings of the game on the server: it draws the world even though
    nobody watches it.
 3. Start the server: double-click start-server.bat (or MPFever.exe --server). The first
@@ -82,9 +83,8 @@ and on "restart".
   company-mode=shared          shared: one company for everybody. separate: one company per
                                player (still in development, many bugs remain).
   owner=                       separate only: the player name that gets the savegame's own
-                               company (the first player who joins under that name; from then
-                               on the company follows that player's Steam account). Empty:
-                               nobody plays it (every player gets a new one).
+                               company (whoever joins under that name). Empty: nobody plays
+                               it (every player gets a new one).
   start-money=2000000          separate only: money of a new company.
   start-speed=1                Game speed when the world starts: 1, 2 or 4.
   pause-when-empty=true        The world waits while nobody is connected. false: it always runs.

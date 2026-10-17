@@ -6,7 +6,7 @@
 
 [size=4][b]Features[/b][/size]
 [list]
-[*][b]Co-op in one shared company, or one company per player.[/b] The host chooses when hosting. In a shared company, money, vehicles, lines and infrastructure are shared. With one company per player, every player has their own money, roads, stations, vehicles, lines and colour, on the same map. A player finds their company again after a reconnection: it belongs to their Steam account. Every company has its own loans and contracts, the windows show who owns what, and stations are shared with the other companies for a fee per stop. The "one company per player" mode is still in development and many bugs remain: use it mainly to test it and help the development of the mod.
+[*][b]Co-op in one shared company, or one company per player.[/b] The host chooses when hosting. In a shared company, money, vehicles, lines and infrastructure are shared. With one company per player, every player has their own money, roads, stations, vehicles, lines and colour, on the same map. A player finds their company again after a reconnection under the same name. Every company has its own loans and contracts, the windows show who owns what, and stations are shared with the other companies for a fee per stop. The "one company per player" mode is still in development and many bugs remain: use it mainly to test it and help the development of the mod.
 [*][b]Real-time sync of what you build.[/b] Every game applies it at the same game time: roads and tracks (including joins in the middle of a road and upgrades); bus and tram stops, stations, depots, buildings; the bulldozer, terrain editing and trees; vehicle purchases, lines, vehicle assignments, game speed and pause.
 [*][b]Games that stay identical.[/b] Since 0.3.4 the main cause of desyncs is fixed: the game's own scripts now take their decisions in the same order on every PC.
 [*][b]Host authority.[/b] Every 10 seconds the games compare their state: money, loans, company progress, contracts, towns and industries; cargo in buildings and vehicles; vehicles and roads. Money is corrected automatically. Any other lasting difference triggers an [b]automatic resync[/b]: a short pause, the host's game is sent to everyone, all games reload it, and play resumes (about 20 s).
@@ -22,7 +22,7 @@
 [*]Ground paint is not copied yet.
 [*]Each build appears after about 1 to 2 seconds: every game applies it at the same game time.
 [*]Tested with 2 players. Windows only.
-[*]Made for the current Steam version of the game (builds 40408 and 40420).
+[*]Made for the current Steam version of the game (builds 40408 and 40420) and the GOG version.
 [/list]
 
 [size=4][b]Open source and transparent[/b][/size]

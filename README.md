@@ -17,7 +17,7 @@ Player documentation is in [`docs/`](docs/): [README](docs/README.txt), [INSTALL
 
 - **Two ways to play**, chosen by the host:
   - "One company for everybody": shared money, vehicles and lines.
-  - "One company per player": own money, roads, stations, depots, vehicles, lines, loans and contracts, and a colour per company. The company belongs to the player's Steam account and is found again after a reconnection.
+  - "One company per player": own money, roads, stations, depots, vehicles, lines, loans and contracts, and a colour per company. The company belongs to the player's name (typed in MPFever) and is found again after a reconnection under the same name.
 - **Everything is replicated exactly** in every game, at the same game time:
   - roads, tracks, tram tracks, signals, stops, stations, depots, buildings;
   - terrain edits, trees of the brush, the bulldozer;
@@ -209,7 +209,8 @@ The real tests run two games on one PC: `MPFever.exe --autotest <savegame>`, wit
 Experimental (0.3.13). Supported game builds:
 
 - **40420**, the current Steam version: supported, with the Lua seed fix.
-- **40408**: supported, but the Lua seed fix is only applied on 40420.
+- **40408**: supported, but the Lua seed fix is only applied on 40420 and GOG.
+- **GOG** (TransportFever3.exe stamp `0x6ab3eec7`, a few days older than 40408): supported, with the Lua seed fix and the companies mode. Its addresses were found again from 40420's with the call graph (`native/sites_gog.h`); not tested in a session yet.
 
 See [`docs/ROADMAP.txt`](docs/ROADMAP.txt).
 

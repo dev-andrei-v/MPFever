@@ -9,7 +9,7 @@
 - **Co-op in one shared company, or one company per player.** The host chooses when hosting.
   - Shared company: shared money, vehicles, lines and infrastructure.
   - One company per player: own money, roads, stations, vehicles, lines and colour, on the same map.
-    - A player finds their company again after a reconnection: it belongs to their Steam account.
+    - A player finds their company again after a reconnection under the same name.
     - Every company has its own loans and contracts.
     - The windows show who owns what.
     - Stations are shared with the other companies for a fee per stop.
@@ -44,7 +44,7 @@
 - Ground paint is not copied yet.
 - Each build appears after about 1 to 2 seconds: every game applies it at the same game time.
 - Tested with 2 players. Windows only.
-- Made for the current Steam version of the game (builds 40408 and 40420).
+- Made for the current Steam version of the game (builds 40408 and 40420) and the GOG version.
 
 ## Open source and transparent
 
