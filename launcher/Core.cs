@@ -1016,8 +1016,12 @@ namespace MPFever
     {
         public const string AppId = "3493540";
 
-        public static string FindGameDir()
+        public static bool IsGameDir(string dir) => !string.IsNullOrWhiteSpace(dir) && File.Exists(Path.Combine(dir, "TransportFever3.exe"));
+
+        public static string FindGameDir(string chosen = null)
         {
+            // 0. the folder chosen with « Browse… » (gamedir= in mpfever_settings.txt)
+            if (IsGameDir(chosen)) return chosen;
             // 1. launcher placed inside the game folder (MPFever\...)
             var d = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
             while (d != null)
@@ -1029,10 +1033,51 @@ namespace MPFever
             foreach (var lib in SteamLibraries())
             {
                 var p = Path.Combine(lib, "steamapps", "common", "Transport Fever 3");
-                if (File.Exists(Path.Combine(p, "TransportFever3.exe"))) return p;
+                if (IsGameDir(p)) return p;
             }
-            return null;
+            // 3. GOG (GOG Galaxy and the offline installer register every game under GOG.com\Games)
+            return GogGameDirs().FirstOrDefault(IsGameDir);
         }
+
+        static IEnumerable<string> GogGameDirs()
+        {
+            var dirs = new List<string>();
+            try
+            {
+                using (var games = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\GOG.com\Games") ?? Registry.LocalMachine.OpenSubKey(@"SOFTWARE\GOG.com\Games"))
+                    if (games != null)
+                        foreach (var id in games.GetSubKeyNames())
+                            using (var g = games.OpenSubKey(id))
+                                if (g?.GetValue("path") is string p) dirs.Add(p);
+            }
+            catch { }
+            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            dirs.Add(Path.Combine(pf, "GOG Galaxy", "Games", "Transport Fever 3"));
+            dirs.Add(Path.Combine(pf, "GOG Games", "Transport Fever 3"));
+            return dirs;
+        }
+
+        /// <summary>The game's user folders (mods, save, settings.lua, profile.lua): local\ of every Steam user of this PC
+        /// who has the game, and %APPDATA%\Transport Fever 3 for the GOG (and Epic) version.</summary>
+        public static List<string> UserDirs()
+        {
+            var dirs = new List<string>();
+            try
+            {
+                var steam = SteamPath();
+                var userdata = steam != null ? Path.Combine(steam, "userdata") : null;
+                if (userdata != null && Directory.Exists(userdata))
+                    dirs.AddRange(Directory.GetDirectories(userdata).Select(u => Path.Combine(u, AppId, "local")).Where(Directory.Exists));
+            }
+            catch { }
+            if (Directory.Exists(GogUserDir)) dirs.Add(GogUserDir);
+            return dirs;
+        }
+
+        static string GogUserDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Transport Fever 3");
+
+        /// <summary>A Steam copy of the game (it carries Steam's library): invitations and steam_appid.txt only make sense there.</summary>
+        public static bool IsSteamGame(string gameDir) => gameDir != null && File.Exists(Path.Combine(gameDir, "steam_api64.dll"));
 
         /// <summary>The game's language as written by the game or Steam (raw value, see L.Normalize), and where it was
         /// found: "game" (the language chosen in the game's options: profile.lua, language = { code = "de" }) or "steam"
@@ -1040,22 +1085,16 @@ namespace MPFever
         public static string GameLanguage(out string where)
         {
             where = null;
-            var steam = SteamPath();
-            if (steam == null) return null;
-            // 1. the game's own option: the most recently written profile.lua of the Steam users of this computer
+            // 1. the game's own option: the most recently written profile.lua of the game's user folders on this computer
             try
             {
-                var userdata = Path.Combine(steam, "userdata");
-                if (Directory.Exists(userdata))
+                var files = UserDirs()
+                    .SelectMany(u => new[] { Path.Combine(u, "profile.lua"), Path.Combine(u, "settings.lua") })
+                    .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).ToList();
+                foreach (var f in files)
                 {
-                    var files = Directory.GetDirectories(userdata)
-                        .SelectMany(u => new[] { Path.Combine(u, AppId, "local", "profile.lua"), Path.Combine(u, AppId, "local", "settings.lua") })
-                        .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).ToList();
-                    foreach (var f in files)
-                    {
-                        var code = LanguageInLua(File.ReadAllText(f));
-                        if (code != null) { where = "game"; return code; }
-                    }
+                    var code = LanguageInLua(File.ReadAllText(f));
+                    if (code != null) { where = "game"; return code; }
                 }
             }
             catch { }
@@ -1124,19 +1163,17 @@ namespace MPFever
             return null;
         }
 
-        /// <summary>Copies the mod into every Steam user's TF3 mods folder.</summary>
-        public static int InstallMod()
+        /// <summary>Copies the mod into the mods folder of every user folder of the game (Steam users, GOG).</summary>
+        public static int InstallMod(string gameDir)
         {
             var src = FindModSource();
-            var steam = SteamPath();
-            if (src == null || steam == null) { Log.Err(L.T("Mod ou Steam introuvable, installation du mod ignorée", "Mod or Steam not found, mod installation skipped")); return 0; }
+            // the GOG version makes its user folder on its first start: the mod must be there before (it starts with the mod's script)
+            if (!IsSteamGame(gameDir)) Directory.CreateDirectory(Path.Combine(GogUserDir, "mods"));
+            var locals = UserDirs();
+            if (src == null || locals.Count == 0) { Log.Err(L.T("Mod ou dossier utilisateur du jeu introuvable, installation du mod ignorée", "Mod or the game's user folder not found, mod installation skipped")); return 0; }
             int n = 0;
-            var userdata = Path.Combine(steam, "userdata");
-            if (!Directory.Exists(userdata)) return 0;
-            foreach (var u in Directory.GetDirectories(userdata))
+            foreach (var local in locals)
             {
-                var local = Path.Combine(u, AppId, "local");
-                if (!Directory.Exists(local)) continue;
                 var dst = Path.Combine(local, "mods", "mpfever_1");
                 if (Directory.Exists(dst)) Directory.Delete(dst, true); // mirror: drop files removed from the mod
                 CopyDir(src, dst);
@@ -1151,13 +1188,9 @@ namespace MPFever
         public static void EnsureModActive()
         {
             if (Process.GetProcessesByName("TransportFever3").Length > 0) return;
-            var steam = SteamPath();
-            if (steam == null) return;
-            var userdata = Path.Combine(steam, "userdata");
-            if (!Directory.Exists(userdata)) return;
-            foreach (var u in Directory.GetDirectories(userdata))
+            foreach (var local in UserDirs())
             {
-                var f = Path.Combine(u, AppId, "local", "settings.lua");
+                var f = Path.Combine(local, "settings.lua");
                 if (!File.Exists(f)) continue;
                 var s = File.ReadAllText(f);
                 int i = s.IndexOf("activeModsState = {", StringComparison.Ordinal);
@@ -1201,18 +1234,12 @@ namespace MPFever
             catch (IOException) { Log.Warn(L.T("Module natif : fermez Transport Fever 3 puis relancez MPFever pour le mettre à jour", "Native module: close Transport Fever 3, then restart MPFever to update it")); }
         }
 
-        /// <summary>The savegame folders of every Steam user of this PC (created if missing).</summary>
+        /// <summary>The savegame folders of every user folder of the game on this PC (created if missing).</summary>
         public static List<string> SaveDirs()
         {
             var dirs = new List<string>();
-            var steam = SteamPath();
-            if (steam == null) return dirs;
-            var userdata = Path.Combine(steam, "userdata");
-            if (!Directory.Exists(userdata)) return dirs;
-            foreach (var u in Directory.GetDirectories(userdata))
+            foreach (var local in UserDirs())
             {
-                var local = Path.Combine(u, AppId, "local");
-                if (!Directory.Exists(local)) continue;
                 var save = Path.Combine(local, "save");
                 Directory.CreateDirectory(save);
                 dirs.Add(save);

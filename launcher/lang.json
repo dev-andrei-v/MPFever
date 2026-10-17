@@ -92,19 +92,6 @@
       "zh-CN": "已在游戏文件夹中创建 steam_appid.txt",
       "zh-TW": "已在遊戲資料夾中建立 steam_appid.txt"
     },
-    "Mod or Steam not found, mod installation skipped": {
-      "de": "Mod oder Steam nicht gefunden, Mod-Installation übersprungen",
-      "es": "Mod o Steam no encontrado, instalación del mod omitida",
-      "it": "Mod o Steam non trovato, installazione della mod saltata",
-      "nl": "Mod of Steam niet gevonden, installatie van de mod overgeslagen",
-      "pl": "Nie znaleziono moda lub Steam, pominięto instalację moda",
-      "pt-BR": "Mod ou Steam não encontrado, instalação do mod ignorada",
-      "ru": "Мод или Steam не найдены, установка мода пропущена",
-      "ja": "MOD または Steam が見つかりません。MOD のインストールをスキップしました",
-      "ko": "모드나 Steam을 찾을 수 없어 모드 설치를 건너뛰었습니다",
-      "zh-CN": "未找到模组或 Steam，已跳过模组安装",
-      "zh-TW": "找不到模組或 Steam，已略過模組安裝"
-    },
     "Mod installed in ": {
       "de": "Mod installiert in ",
       "es": "Mod instalado en ",
@@ -858,19 +845,6 @@
       "ko": "동기화 안 됨",
       "zh-CN": "不同步",
       "zh-TW": "不同步"
-    },
-    "Transport Fever 3 was not found. Check that the game is installed through Steam.": {
-      "de": "Transport Fever 3 wurde nicht gefunden. Prüfe, ob das Spiel über Steam installiert ist.",
-      "es": "No se encontró Transport Fever 3. Comprueba que el juego esté instalado a través de Steam.",
-      "it": "Transport Fever 3 non trovato. Verifica che il gioco sia installato tramite Steam.",
-      "nl": "Transport Fever 3 is niet gevonden. Controleer of het spel via Steam is geïnstalleerd.",
-      "pl": "Nie znaleziono Transport Fever 3. Sprawdź, czy gra jest zainstalowana przez Steam.",
-      "pt-BR": "O Transport Fever 3 não foi encontrado. Verifique se o jogo está instalado pela Steam.",
-      "ru": "Transport Fever 3 не найдена. Проверьте, что игра установлена через Steam.",
-      "ja": "Transport Fever 3 が見つかりませんでした。ゲームが Steam でインストールされているか確認してください。",
-      "ko": "Transport Fever 3를 찾을 수 없습니다. 게임이 Steam으로 설치되어 있는지 확인하세요.",
-      "zh-CN": "未找到 Transport Fever 3。请确认游戏已通过 Steam 安装。",
-      "zh-TW": "找不到 Transport Fever 3。請確認遊戲已透過 Steam 安裝。"
     },
     "The game is starting. Choose « Multiplayer (MPFever) » in its main menu to host or join a game.": {
       "de": "Das Spiel startet. Wähle « Mehrspieler (MPFever) » im Hauptmenü, um ein Spiel zu hosten oder beizutreten.",
@@ -4524,6 +4498,97 @@
       "ko": "전용 서버: %s",
       "zh-CN": "专用服务器：%s",
       "zh-TW": "專用伺服器：%s"
+    },
+    "Game folder: Browse…": {
+      "de": "Spielordner: Durchsuchen…",
+      "es": "Carpeta del juego: Examinar…",
+      "it": "Cartella del gioco: Sfoglia…",
+      "nl": "Spelmap: Bladeren…",
+      "pl": "Folder gry: Przeglądaj…",
+      "pt-BR": "Pasta do jogo: Procurar…",
+      "ru": "Папка игры: Обзор…",
+      "ja": "ゲームフォルダー：参照…",
+      "ko": "게임 폴더: 찾아보기…",
+      "zh-CN": "游戏文件夹：浏览…",
+      "zh-TW": "遊戲資料夾：瀏覽…"
+    },
+    "Select TransportFever3.exe": {
+      "de": "TransportFever3.exe auswählen",
+      "es": "Selecciona TransportFever3.exe",
+      "it": "Seleziona TransportFever3.exe",
+      "nl": "Selecteer TransportFever3.exe",
+      "pl": "Wybierz TransportFever3.exe",
+      "pt-BR": "Selecione TransportFever3.exe",
+      "ru": "Выберите TransportFever3.exe",
+      "ja": "TransportFever3.exe を選択",
+      "ko": "TransportFever3.exe 선택",
+      "zh-CN": "选择 TransportFever3.exe",
+      "zh-TW": "選擇 TransportFever3.exe"
+    },
+    "This folder does not contain TransportFever3.exe.": {
+      "de": "Dieser Ordner enthält keine TransportFever3.exe.",
+      "es": "Esta carpeta no contiene TransportFever3.exe.",
+      "it": "Questa cartella non contiene TransportFever3.exe.",
+      "nl": "Deze map bevat geen TransportFever3.exe.",
+      "pl": "Ten folder nie zawiera TransportFever3.exe.",
+      "pt-BR": "Esta pasta não contém TransportFever3.exe.",
+      "ru": "В этой папке нет TransportFever3.exe.",
+      "ja": "このフォルダーには TransportFever3.exe がありません。",
+      "ko": "이 폴더에는 TransportFever3.exe가 없습니다.",
+      "zh-CN": "此文件夹中没有 TransportFever3.exe。",
+      "zh-TW": "此資料夾中沒有 TransportFever3.exe。"
+    },
+    "Game folder: {0} (used the next time MPFever starts)": {
+      "de": "Spielordner: {0} (wird beim nächsten Start von MPFever verwendet)",
+      "es": "Carpeta del juego: {0} (se usará la próxima vez que se inicie MPFever)",
+      "it": "Cartella del gioco: {0} (usata al prossimo avvio di MPFever)",
+      "nl": "Spelmap: {0} (gebruikt bij de volgende start van MPFever)",
+      "pl": "Folder gry: {0} (zostanie użyty przy następnym uruchomieniu MPFever)",
+      "pt-BR": "Pasta do jogo: {0} (usada na próxima vez que o MPFever iniciar)",
+      "ru": "Папка игры: {0} (будет использована при следующем запуске MPFever)",
+      "ja": "ゲームフォルダー：{0}（次回 MPFever の起動時に使用されます）",
+      "ko": "게임 폴더: {0} (다음에 MPFever를 시작할 때 사용됨)",
+      "zh-CN": "游戏文件夹：{0}（下次启动 MPFever 时使用）",
+      "zh-TW": "遊戲資料夾：{0}（下次啟動 MPFever 時使用）"
+    },
+    "Transport Fever 3 was not found. Check that the game is installed through Steam or GOG, or select its folder with « Browse… » below.": {
+      "de": "Transport Fever 3 wurde nicht gefunden. Prüfe, ob das Spiel über Steam / GOG installiert ist. Oder wähle seinen Ordner unten mit « Durchsuchen… ».",
+      "es": "No se encontró Transport Fever 3. Comprueba que el juego esté instalado a través de Steam / GOG. O selecciona su carpeta con « Examinar… » abajo.",
+      "it": "Transport Fever 3 non trovato. Verifica che il gioco sia installato tramite Steam / GOG. Oppure seleziona la sua cartella con « Sfoglia… » qui sotto.",
+      "nl": "Transport Fever 3 is niet gevonden. Controleer of het spel via Steam / GOG is geïnstalleerd. Of selecteer de map hieronder met « Bladeren… ».",
+      "pl": "Nie znaleziono Transport Fever 3. Sprawdź, czy gra jest zainstalowana przez Steam / GOG. Albo wskaż jej folder przyciskiem « Przeglądaj… » poniżej.",
+      "pt-BR": "O Transport Fever 3 não foi encontrado. Verifique se o jogo está instalado pela Steam / GOG. Ou selecione a pasta dele com « Procurar… » abaixo.",
+      "ru": "Transport Fever 3 не найдена. Проверьте, что игра установлена через Steam / GOG. Или укажите папку игры кнопкой « Обзор… » ниже.",
+      "ja": "Transport Fever 3 が見つかりませんでした。ゲームが Steam / GOG でインストールされているか確認してください。または下の「参照…」でゲームのフォルダーを選択してください。",
+      "ko": "Transport Fever 3를 찾을 수 없습니다. 게임이 Steam / GOG로 설치되어 있는지 확인하세요. 또는 아래의 « 찾아보기… »로 게임 폴더를 선택하세요.",
+      "zh-CN": "未找到 Transport Fever 3。请确认游戏已通过 Steam / GOG 安装。或者通过下方的“浏览…”选择游戏文件夹。",
+      "zh-TW": "找不到 Transport Fever 3。請確認遊戲已透過 Steam / GOG 安裝。或者透過下方的「瀏覽…」選擇遊戲資料夾。"
+    },
+    "Mod or the game's user folder not found, mod installation skipped": {
+      "de": "Mod oder Benutzerordner des Spiels nicht gefunden, Mod-Installation übersprungen",
+      "es": "No se encontró el mod o la carpeta de usuario del juego; se omitió la instalación del mod",
+      "it": "Mod o cartella utente del gioco non trovata, installazione della mod saltata",
+      "nl": "Mod of gebruikersmap van het spel niet gevonden, installatie van de mod overgeslagen",
+      "pl": "Nie znaleziono moda lub folderu użytkownika gry, pominięto instalację moda",
+      "pt-BR": "Mod ou pasta de usuário do jogo não encontrada, instalação do mod ignorada",
+      "ru": "Мод или папка пользователя игры не найдены, установка мода пропущена",
+      "ja": "MOD またはゲームのユーザーフォルダーが見つかりません。MOD のインストールをスキップしました",
+      "ko": "모드 또는 게임의 사용자 폴더를 찾을 수 없어 모드 설치를 건너뛰었습니다",
+      "zh-CN": "未找到模组或游戏的用户文件夹，已跳过模组安装",
+      "zh-TW": "找不到模組或遊戲的使用者資料夾，已略過模組安裝"
+    },
+    "Mod not installed: the game is not started": {
+      "de": "Mod nicht installiert: Das Spiel wird nicht gestartet",
+      "es": "Mod no instalado: el juego no se inicia",
+      "it": "Mod non installata: il gioco non viene avviato",
+      "nl": "Mod niet geïnstalleerd: het spel wordt niet gestart",
+      "pl": "Mod nie jest zainstalowany: gra nie zostanie uruchomiona",
+      "pt-BR": "Mod não instalado: o jogo não é iniciado",
+      "ru": "Мод не установлен: игра не запускается",
+      "ja": "MOD がインストールされていません：ゲームは起動しません",
+      "ko": "모드가 설치되지 않음: 게임을 시작하지 않습니다",
+      "zh-CN": "模组未安装：不启动游戏",
+      "zh-TW": "模組未安裝：不啟動遊戲"
     }
   }
 }

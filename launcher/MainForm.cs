@@ -250,6 +250,9 @@ namespace MPFever
             var info = new Card();
             hint.Font = Theme.Ui(9.75f);
             info.Controls.Add(hint);
+            var browseBtn = new ModernButton(ButtonKind.Secondary) { Text = T("Dossier du jeu : Parcourir…", "Game folder: Browse…"), Dock = DockStyle.Bottom };
+            browseBtn.Click += (s, e) => BrowseGameDir();
+            info.Controls.Add(browseBtn);
             Ui.StackTop(info, Ui.Caption(T("Que faire ?", "What next?")));
 
             var left = new Panel { Dock = DockStyle.Left, Width = S(340), Padding = new Padding(0, 0, S(16), 0) };
@@ -539,7 +542,8 @@ namespace MPFever
             string h;
             if (ServerMode) UpdateServerCard();
             if (gameMissing)
-                h = T("Transport Fever 3 est introuvable. Vérifiez que le jeu est installé via Steam.", "Transport Fever 3 was not found. Check that the game is installed through Steam.");
+                h = T("Transport Fever 3 est introuvable. Vérifiez que le jeu est installé via Steam ou GOG, ou indiquez son dossier avec « Parcourir… » ci-dessous.",
+                      "Transport Fever 3 was not found. Check that the game is installed through Steam or GOG, or select its folder with « Browse… » below.");
             else if (ServerMode && st) h = F("Le serveur héberge son monde. Les joueurs le rejoignent depuis la fenêtre MPFever de leur jeu avec l'adresse de ce PC, port {0}.\n\nTapez help sous le journal pour les commandes du serveur.",
                                              "The server hosts its world. Players join it from the MPFever window of their game with this PC's address, port {0}.\n\nType help under the log for the server commands.", server?.Port ?? 28090);
             else if (ServerMode) h = (menuText ?? "") + T("\n\nTapez help sous le journal pour les commandes du serveur.", "\n\nType help under the log for the server commands.");
@@ -570,13 +574,16 @@ namespace MPFever
 
         void Init()
         {
-            gameDir = GameInstall.FindGameDir();
+            gameDir = GameInstall.FindGameDir(LoadSettings().TryGetValue("gamedir", out var chosen) ? chosen : null);
             if (gameDir == null) { gameMissing = true; Log.Err(T("Transport Fever 3 introuvable.", "Transport Fever 3 not found.")); status.Text = T("Jeu introuvable", "Game not found"); return; }
             Log.W(T("Jeu : ", "Game: ") + gameDir);
-            try { GameInstall.EnsureSteamAppId(gameDir); } catch (Exception e) { Log.W("steam_appid.txt : " + e.Message); }
+            if (GameInstall.IsSteamGame(gameDir)) try { GameInstall.EnsureSteamAppId(gameDir); } catch (Exception e) { Log.W("steam_appid.txt : " + e.Message); }
             try { GameInstall.InstallNative(gameDir); } catch (Exception e) { Log.W("winhttp.dll: " + e.Message); }
             try { GameInstall.EnsureModActive(); } catch (Exception e) { Log.W("settings.lua: " + e.Message); }
-            try { GameInstall.InstallMod(); } catch (Exception e) { Log.Warn(T("Installation du mod : ", "Mod installation: ") + e.Message); }
+            int mods = 0;
+            try { mods = GameInstall.InstallMod(gameDir); } catch (Exception e) { Log.Warn(T("Installation du mod : ", "Mod installation: ") + e.Message); }
+            // the game starts with the mod's script: without the mod it stops at once ("Mod was not cached in filesystem")
+            if (mods == 0) { status.Text = T("Mod non installé : le jeu n'est pas démarré", "Mod not installed: the game is not started"); return; }
             if (ServerMode)
             {
                 StartServerMode();
@@ -591,6 +598,31 @@ namespace MPFever
             {
                 Guard(StartLocalTest);
                 new Thread(AutoTest) { IsBackground = true, Name = "Autotest" }.Start();
+            }
+        }
+
+        /// <summary>« Browse… »: the player picks TransportFever3.exe; its folder is kept (gamedir= in mpfever_settings.txt)
+        /// and comes before the automatic search. A game not found at start is then set up and started at once.</summary>
+        void BrowseGameDir()
+        {
+            using (var dlg = new OpenFileDialog
+            {
+                Title = T("Choisir TransportFever3.exe", "Select TransportFever3.exe"),
+                Filter = "Transport Fever 3|TransportFever3.exe",
+                FileName = "TransportFever3.exe",
+                CheckFileExists = true,
+            })
+            {
+                if (GameInstall.IsGameDir(gameDir)) dlg.InitialDirectory = gameDir;
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                var dir = Path.GetDirectoryName(dlg.FileName);
+                if (!GameInstall.IsGameDir(dir)) { Log.Warn(T("Ce dossier ne contient pas TransportFever3.exe.", "This folder does not contain TransportFever3.exe.")); return; }
+                SaveSetting("gamedir", dir);
+                if (string.Equals(dir, gameDir, StringComparison.OrdinalIgnoreCase)) return;
+                if (running) { Log.W(F("Dossier du jeu : {0} (utilisé au prochain démarrage de MPFever)", "Game folder: {0} (used the next time MPFever starts)", dir)); return; }
+                gameMissing = false;
+                status.Text = T("Prêt.", "Ready.");
+                Init();   // sets up the chosen folder (and starts the game, as at start)
             }
         }
 
@@ -790,8 +822,8 @@ namespace MPFever
                 catch (Exception e) { menuPhase = "error"; menuText = T("Impossible d'héberger : ", "Cannot host: ") + e.Message; MenuStatus(); return; }
                 // the lobby opens: the savegame is loaded once the host starts the game (see StartLobbyGame), by every game at once
                 lobbySave = arg; lobbyOpen = true; lobbyStarting = false;
-                // Steam: friends can join from their friends list or an invitation
-                new Thread(() =>
+                // Steam: friends can join from their friends list or an invitation (not with the GOG version)
+                if (GameInstall.IsSteamGame(gameDir)) new Thread(() =>
                 {
                     // the public IPv4 and, when this PC has one, its IPv6 (behind DS-Lite only the IPv6 reaches it)
                     var v6 = LoadSettings().TryGetValue("ipv6", out var i6) && i6.Trim() == "0" ? new List<string>() : NetAddr.PublicIPv6List();
