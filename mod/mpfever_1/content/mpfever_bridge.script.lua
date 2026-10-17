@@ -789,7 +789,7 @@ local function coApply(st, a)
 	end
 	-- (a dedicated server names the player who gets the savegame's company)
 	if type(p.owner) == "string" then st.co.owner = p.owner end
-	local c, isNew = CO.join(st.co, tostring(p.key), tostring(p.name), p.host == true, p.cname, p.sid)
+	local c, isNew = CO.join(st.co, tostring(p.key), tostring(p.name), p.host == true, p.cname)
 	log("companies: player '" .. tostring(p.key) .. "' plays company " .. c.id .. (isNew and " (new)" or " (known)"))
 	installSimPlayer(st)
 end
@@ -4007,7 +4007,7 @@ local function pumpCompanies()
 	local b = G.coBusy
 	if not b then return end
 	local age = G.frames - b.frame
-	local c = G.co and CO.match(G.co, b.a.args.key, b.a.args.sid, b.a.args.host == true)
+	local c = G.co and CO.match(G.co, b.a.args.key, b.a.args.host == true)
 	if b.phase == "apply" then
 		if not b.sent then b.sent = true; toSim("co_apply", b.a) end
 		if c then
@@ -8991,25 +8991,11 @@ G.coMyName = function()
 	return n
 end
 
--- (G.coMyName/coMyKey/coMySid are fields of G: the main chunk is at Lua's limit of 200 locals)
+-- (G.coMyName/coMyKey are fields of G: the main chunk is at Lua's limit of 200 locals)
 -- this player's key in the registry: its name in lower case; empty for a dedicated server, which plays no company of its own
 G.coMyKey = function()
 	if C.SERVER then return "" end
 	return G.coMyName():lower()
-end
-
--- this player's Steam account (steam_id.txt, written by the native module once Steam is up), nil while unknown (and never
--- used for a dedicated server: its account owns no company)
-G.coMySid = function()
-	if C.SERVER then return nil end
-	if G.mySid == nil and G.frames - (G.sidTried or -1000) > 120 then
-		G.sidTried = G.frames
-		pcall(function()
-			local f = C.IO.open(C.DIR .. BS .. "steam_id.txt", "rb")
-			if f then G.mySid = (f:read("*a") or ""):match("%d+"); f:close() end
-		end)
-	end
-	return G.mySid
 end
 
 -- The level of a company (rank, experience, permits) lives in a game script that only follows the savegame's company. The interface
@@ -9084,11 +9070,10 @@ local function coGui(st)
 		local name = G.coMyName()
 		G.oseq = G.oseq + 1
 		local paused = G.session.pauseAt ~= nil and now >= G.session.pauseAt and gameSpeed() == 0
-		-- the player's Steam account (written by the native module): the company follows the account, whatever name is typed
-		local sid = G.coMySid()
+		-- the company follows the name typed in MPFever (Steam, GOG: no store account involved)
 		local a = { fn = "mpfCoJoin", origin = G.me, oseq = G.oseq, uid = G.me .. ":" .. G.oseq,
 			at = paused and pausedStamp(now) or stampFor(now), paused = paused or nil,
-			args = { key = G.coMyKey(), name = name, host = (C.ROLE == "host"), mode = "separate", start = G.coStart, sid = sid,
+			args = { key = G.coMyKey(), name = name, host = (C.ROLE == "host"), mode = "separate", start = G.coStart,
 				owner = C.SERVER and (G.coOwner or "") or nil,
 				cname = C.Tf("Entreprise %s", "%s Company", name) } }
 		a.native = true
@@ -9100,7 +9085,7 @@ local function coGui(st)
 	-- which company is this game's: its interface and tools act as that company from now on
 	local reg = st.co
 	if reg then
-		local c = CO.match(reg, G.coMyKey(), G.coMySid(), C.ROLE == "host")
+		local c = CO.match(reg, G.coMyKey(), C.ROLE == "host")
 		-- the other companies' player entities (the native module empties their money popups, see ClearOthers)
 		local others = {}
 		for _, o in ipairs(reg.list) do if o.ent and c and o.ent ~= c.ent then others[#others + 1] = o.ent end end

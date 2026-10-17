@@ -60,56 +60,36 @@ local function freeColor(reg)
 	return (#reg.list % #CO.PALETTE) + 1
 end
 
--- The company of a player, known by its Steam account (`sid`, nil when unknown) and by its name (`key`):
---  1. the company of that name, unless it belongs to another Steam account;
---  2. else (not for the host) the company of that Steam account other than the savegame's (the player changed its name), when there
---     is exactly one (two games of one PC share the account: a test setup);
--- nil when the player has no company yet.
-function CO.match(reg, key, sid, isHost)
+-- The company of a player, known by the name typed in MPFever (`key`, in lower case): the company of that name, or (not for the
+-- host) the savegame's company when a dedicated server names that player its owner and nobody has it yet; nil when the player has
+-- no company yet. (Companies of savegames from before 0.3.14 may carry a Steam account, `sid`: it is no longer used.)
+function CO.match(reg, key, isHost)
 	if not reg then return nil end
 	-- (a dedicated server: its game shows the savegame's company, which it never claims)
 	if isHost and key == "" then return reg.list[1] end
 	for _, c in ipairs(reg.list) do
-		if c.key == key and key ~= "" and (sid == nil or c.sid == nil or c.sid == sid) then return c end
+		if c.key == key and key ~= "" then return c end
 	end
 	-- (the host plays the savegame's company: CO.join gives it company 1)
 	if isHost then return nil end
 	-- the owner named by a dedicated server takes the savegame's company while nobody has it
 	local first = reg.list[1]
 	if first and first.key == "" and type(reg.owner) == "string" and reg.owner ~= "" and key == reg.owner then return first end
-	if sid then
-		local found, n = nil, 0
-		for _, c in ipairs(reg.list) do
-			if c.sid == sid and c.id ~= 1 then found = found or c; n = n + 1 end
-		end
-		if n == 1 then return found end
-	end
 	return nil
 end
 
 -- A player is placed: its company (kept from an earlier visit, see CO.match), the savegame's company when it is the host, or a new
 -- one. Returns the company and whether it is new (its player entity must be created).
-function CO.join(reg, key, name, isHost, newName, sid)
-	local mine = CO.match(reg, key, sid, isHost)
-	-- (a dedicated server: nothing to claim)
-	if mine and key == "" then return mine, false end
-	if mine then
-		-- (a new name for a known account: the company follows it)
-		if mine.key ~= key then mine.key = key end
-		if sid and not mine.sid then mine.sid = sid end
-		return mine, false
-	end
+function CO.join(reg, key, name, isHost, newName)
+	local mine = CO.match(reg, key, isHost)
+	if mine then return mine, false end
 	local first = reg.list[1]
 	if isHost then
 		-- the savegame's own company belongs to whoever hosts it
 		first.key = key
-		first.sid = sid
 		return first, false
 	end
-	-- (a name another account already has: the new company's key carries the account, so that both are told apart)
-	local k = key
-	if CO.byKey(reg, k) then k = key .. "@" .. tostring(sid or #reg.list + 1) end
-	local c = { id = #reg.list + 1, key = k, name = newName or name, color = freeColor(reg), sid = sid }
+	local c = { id = #reg.list + 1, key = key, name = newName or name, color = freeColor(reg) }
 	reg.list[#reg.list + 1] = c
 	return c, true
 end
