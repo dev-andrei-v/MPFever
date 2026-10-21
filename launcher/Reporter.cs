@@ -14,7 +14,7 @@ namespace MPFever
 {
     /// <summary>"Report a problem": every file a bug report needs, in one zip, and a GitHub issue ready to send.
     /// The zip goes to reports\ next to MPFever.exe and is shown in the Explorer; the browser opens a new issue of
-    /// github.com/dkdknight/MPFever with its title and text filled in (version, game build, company mode, players, sync
+    /// MPFever's repository (Updater.Repo) with its title and text filled in (version, game build, company mode, players, sync
     /// state, processor), and the text is also put on the clipboard. The player drags the zip into the issue and sends it:
     /// GitHub lets nobody create an issue or attach a file without an account of their own (a key shipped in MPFever would
     /// let anyone post anything in the project's name), so the last click is theirs.

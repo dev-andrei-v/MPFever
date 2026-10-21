@@ -23,7 +23,8 @@ namespace MPFever
         public long ZipSize;
     }
 
-    /// <summary>Automatic update from the GitHub releases of MPFever (github.com/dkdknight/MPFever/releases).
+    /// <summary>Automatic update from the GitHub releases of this fork of MPFever (github.com/dev-andrei-v/MPFever/releases: the
+    /// original's, github.com/dkdknight/MPFever, would replace it with a build without the GOG version).
     /// At startup, before the game starts, the launcher asks GitHub for the newest release. When it is newer than this
     /// launcher, a window offers to update or to go on without updating. The update downloads the release's zip, checks
     /// its size and SHA-256, puts its files into MPFever's folder and starts the new MPFever.exe (which then installs the
@@ -32,7 +33,7 @@ namespace MPFever
     /// own files (mpfever_settings.txt, logs) are kept. autoupdate=0 in mpfever_settings.txt turns the check off.</summary>
     static class Updater
     {
-        public const string Repo = "dkdknight/MPFever";
+        public const string Repo = "dev-andrei-v/MPFever";
         public const string ReleasesPage = "https://github.com/" + Repo + "/releases";
         const string Api = "https://api.github.com/repos/" + Repo + "/releases?per_page=30";
         /// <summary>How long the start of the game waits at most for GitHub's answer.</summary>
