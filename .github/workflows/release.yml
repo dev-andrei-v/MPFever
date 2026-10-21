@@ -1,0 +1,110 @@
+# Builds MPFever on every push and pull request to main, and publishes a GitHub release for a version tag:
+#
+#   git tag v0.3.22.1 && git push fork v0.3.22.1
+#
+# The tag is the version (MainForm.Version and build.bat's VERSION are set from it before the build). The release gets:
+#   MPFever-Setup-<version>.exe     the installer for players (per user, no administrator rights)
+#   MPFever-<version>.zip           the same files; MPFever's automatic update downloads this one (launcher/Updater.cs)
+#   MPFever-<version>-server.zip    the dedicated server's archive
+# A release must be newer than the last one: the launcher only offers a higher version (0.3.22.1 > 0.3.22).
+
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: write   # (the release, on a tag)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $src = Get-Content launcher/MainForm.cs -Raw
+          $current = [regex]::Match($src, 'public const string Version = "([^"]+)"').Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($v -notmatch '^\d+(\.\d+)+$') { throw "Tag '$env:GITHUB_REF_NAME' is not a version (v1.2.3 or v1.2.3.4)" }
+            # the launcher's version and the archives' names
+            $src = $src -replace 'public const string Version = "[^"]+"', "public const string Version = `"$v`""
+            [IO.File]::WriteAllText("launcher/MainForm.cs", $src)
+            $bat = Get-Content build.bat -Raw
+            $bat = $bat -replace 'set "VERSION=[^"]+"', "set `"VERSION=$v`""
+            [IO.File]::WriteAllText("build.bat", $bat)
+          } else {
+            $v = $current
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "MPFever $v"
+
+      - name: Build (native module, launcher, archives)
+        shell: cmd
+        run: build.bat
+
+      - name: Tests
+        shell: pwsh
+        run: |
+          python tests/test_lang.py
+          if ($LASTEXITCODE) { throw "test_lang failed" }
+          python tests/test_locals.py
+          if ($LASTEXITCODE) { throw "test_locals failed" }
+          # relay, client and update checks without the game (on a copy: nothing it writes goes into the installer)
+          $t = Join-Path $env:RUNNER_TEMP "selftest"
+          Copy-Item -Recurse release/dist/MPFever $t
+          $p = Start-Process -FilePath "$t/MPFever.exe" -ArgumentList "--selftest" -Wait -PassThru -WorkingDirectory $t
+          Get-ChildItem "$t/logs" -Filter *.log | Get-Content
+          if ($p.ExitCode -ne 0) { throw "MPFever --selftest failed ($($p.ExitCode))" }
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" installer\MPFever.iss
+          if ($LASTEXITCODE) { throw "ISCC failed" }
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem release -File | Where-Object { $_.Extension -in '.zip', '.exe' } |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } |
+            Set-Content release/SHA256SUMS.txt
+          Get-Content release/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPFever-${{ steps.version.outputs.version }}
+          path: |
+            release/*.zip
+            release/*.exe
+            release/SHA256SUMS.txt
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MPFever ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          body: |
+            **Players:** download `MPFever-Setup-${{ steps.version.outputs.version }}.exe` and run it (no administrator rights needed), then start MPFever from the Start menu. Or unzip `MPFever-${{ steps.version.outputs.version }}.zip` anywhere and run `MPFever.exe`.
+            **Dedicated server:** `MPFever-${{ steps.version.outputs.version }}-server.zip`.
+
+            Works with Transport Fever 3 on Steam and GOG. Every player needs the same game version and the same MPFever version.
+            The files are not code-signed: Windows SmartScreen may warn ("More info" → "Run anyway"). Their SHA-256 are in `SHA256SUMS.txt`.
+          files: |
+            release/MPFever-Setup-${{ steps.version.outputs.version }}.exe
+            release/MPFever-${{ steps.version.outputs.version }}.zip
+            release/MPFever-${{ steps.version.outputs.version }}-server.zip
+            release/SHA256SUMS.txt
