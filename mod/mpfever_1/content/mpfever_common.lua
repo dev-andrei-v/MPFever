@@ -1099,7 +1099,10 @@ end
 -- the new ends of the construction's own segments that no other segment of the build uses.
 local function isConSegment(sg)
 	local tpl = tostring(sg and sg.comp and sg.comp.roadTemplate or "")
-	return tpl:find("/constructions/", 1, true) ~= nil or tpl:find("simple.street_template", 1, true) ~= nil
+	-- (street entrances, the tracks of rail stations (simple, simple_catenary), the runways and taxiways of airports, the
+	-- tracks of rail depots)
+	return tpl:find("/constructions/", 1, true) ~= nil or tpl:find("/track/simple/simple[%w_]*%.street_template") ~= nil
+		or tpl:find("/street/airport/", 1, true) ~= nil or tpl:find("/rail_depot[%w_]*%.street_template") ~= nil
 end
 
 function C.frozenNodesOf(m, i)
@@ -1122,6 +1125,58 @@ function C.frozenNodesOf(m, i)
 	end
 	if #out > 0 then return out, "guessed" end
 	return nil
+end
+
+-- The edge objects of a native proposal for a construction's signs: the engine's own native objects (native, from its
+-- conversion of the construction: a script cannot write a native object's model), matched by model, place and side, each
+-- put on its segment by the tool's native id. A missing one is an error: the caller then replays without them
+-- (and resynchronises)
+function C.nativeEdgeObjects(list, native)
+	local out = {}
+	-- Matched, in this order: same segment id (the conversion of the first copy numbers its segments as the tool did) and
+	-- model; same model, place and side; same model; else by rank within the first copy (the conversion lists each copy's
+	-- objects in turn, as the tool lists its own). Issue #50: model, place and side alone matched nothing.
+	native = type(native) == "table" and native or {}
+	local used = {}
+	local function norm(v) return (tostring(v):gsub("^::/", ""):gsub("^/", "")) end
+	local function field(x, k) local ok, v = pcall(function() return x[k] end) if ok then return v end return nil end
+	local tests = {
+		function(x, o) return field(x, "segmentEntity") == o.segmentEntity and norm(field(x, "model")) == norm(o.model) end,
+		function(x, o) return norm(field(x, "model")) == norm(o.model) and math.abs((tonumber(field(x, "param")) or -9) - (tonumber(o.param) or 0)) < 1e-3
+			and (field(x, "left") == true) == (o.left == true) end,
+		function(x, o) return norm(field(x, "model")) == norm(o.model) end,
+	}
+	local function find(o, i)
+		for _, t in ipairs(tests) do
+			for j, x in ipairs(native) do
+				if not used[j] then
+					local okx, same = pcall(t, x, o)
+					if okx and same then used[j] = true return x end
+				end
+			end
+		end
+		if #list > 0 and #native >= #list and #native % #list == 0 and native[i] and not used[i] then used[i] = true return native[i] end
+		return nil
+	end
+	-- (what the engine's objects look like, for the log when nothing matches)
+	local function show(x)
+		local t = {}
+		for _, k in ipairs({ "model", "segmentEntity", "param", "left", "category" }) do t[#t + 1] = k .. "=" .. tostring(field(x, k)) end
+		return table.concat(t, " ")
+	end
+	for i, o in ipairs(list or {}) do
+		local eo = type(o) == "table" and find(o, i) or nil
+		if type(o) ~= "table" or type(o.segmentEntity) ~= "number" or eo == nil then
+			error("edge object " .. i .. " not converted (" .. show(o) .. "; the engine's first: " .. (native[1] and show(native[1]) or "none") .. ")")
+		end
+		eo.segmentEntity = o.segmentEntity
+		local pl = o.playerEntity
+		if type(pl) ~= "number" or pl < 0 then pl = api.engine.util.getPlayer() end
+		pcall(function() eo.playerEntity = pl end)
+		pcall(function() eo.resultEntity = -1 end)
+		out[i] = eo
+	end
+	return out
 end
 
 function C.rebuildNativeWithConstruction(m, conv, rm, opts)
@@ -1177,7 +1232,13 @@ function C.rebuildNativeWithConstruction(m, conv, rm, opts)
 		local c = sg.comp or {}
 		if type(c.objects) == "table" then
 			local keep = {}
-			for _, o in ipairs(c.objects) do if type(o) == "table" and type(o[1]) == "number" and o[1] >= 0 then keep[#keep + 1] = { objIds[o[1]] or o[1], o[2] } end end
+			for _, o in ipairs(c.objects) do
+				if type(o) == "table" and type(o[1]) == "number" then
+					if o[1] >= 0 then keep[#keep + 1] = { objIds[o[1]] or o[1], o[2] }
+					-- (the tool's placeholders of its new edge objects, -400000000 - k: kept with them, see C.nativeEdgeObjects)
+					elseif opts.withObjects and o[1] <= -400000000 then keep[#keep + 1] = { o[1], o[2] } end
+				end
+			end
 			c.objects = keep
 		end
 		edges[i] = segmentFrom(sg, "addedSegments[" .. i .. "]")
@@ -1209,6 +1270,11 @@ function C.rebuildNativeWithConstruction(m, conv, rm, opts)
 			local oko, eo = pcall(function() sp.edgeObjectsToRemove = rmObjs end)
 			if not oko then C.errors[#C.errors + 1] = "edgeObjectsToRemove: " .. tostring(eo):sub(1, 100) end
 		end
+	end
+	-- the tool's new edge objects (an airport's signs on its own runways and taxiways), as the tool's proposal has them
+	if opts.withObjects and #(st.edgeObjectsToAdd or {}) > 0 then
+		local okn, en = pcall(function() sp.edgeObjectsToAdd = C.nativeEdgeObjects(st.edgeObjectsToAdd, opts.withObjects) end)
+		if not okn then error("edge objects: " .. tostring(en):gsub("^.-:%d+: ", ""):sub(1, 700)) end
 	end
 	-- the node configurations (lane connections...) the tool removed: only those this game has (removing one that does not
 	-- exist is an engine assertion), and those it added, with the native ids
@@ -1387,6 +1453,33 @@ C.ARGS = {
 	makeEntitySetColorCmd = { false, "Vec3f" },
 }
 
+-- The interface's refundable entities (api.gui.construction.getRefundableEntities(): {{entity, n} = {revision, updateCount}}, what
+-- this player just built; the engine gives its cost back when it is demolished while unchanged) as a list that can be shipped
+function C.refundList(raw)
+	local list = {}
+	for k, v in pairs(raw or {}) do
+		local num = v[1] and v[1].num
+		if type(k) == "table" and type(k[1]) == "number" and num then
+			list[#list + 1] = { e = k[1], x = k[2], r = { num[1], num[2], num[3] }, n = v[2] }
+		end
+	end
+	return list
+end
+
+-- ... and back, for a Context's refundableEntities: the revision is this game's own of that entity (no Revision can be made in
+-- Lua), and only when it is the one the builder's game had (the entity unchanged since, as there)
+function C.toRefund(list)
+	local out = {}
+	for _, it in ipairs(list or {}) do
+		local okr, rev = pcall(function() return api.engine.getRevision(it.e) end)
+		local num = okr and rev and rev.num
+		if num and type(it.r) == "table" and num[1] == it.r[1] and num[2] == it.r[2] and num[3] == it.r[3] then
+			out[{ it.e, it.x }] = { rev, it.n }
+		end
+	end
+	return out
+end
+
 function C.rebuildArgs(fn, margs, opts)
 	C.errors = {}
 	local types = C.ARGS[fn] or {}
@@ -1411,6 +1504,8 @@ function C.rebuildArgs(fn, margs, opts)
 				ctx.gatherBuildings = (k == "terrain" or k == "terrainNoCleanup")
 				ctx.gatherFields = true
 				ctx.player = api.engine.util.getPlayer()
+				-- (the builder's refundable entities, see G.refundInto in the bridge)
+				if type(opts.refund) == "table" then pcall(function() ctx.refundableEntities = C.toRefund(opts.refund) end) end
 				args[i] = ctx
 			end
 		elseif tn == "Context" then
@@ -1444,6 +1539,25 @@ C.FACTORIES = {
 	"makeVehicleSendToDepotCmd", "makeVehicleSetLineCmd", "makeVehicleSetManualDepartureCmd", "makeVehicleSetModifiersCmd",
 	"makeVehicleSetStoppedByUserCmd", "makeVehicleTryToDepartCmd", "makeWorldBuildProposalCmd", "makeWorldChangeWindCmd",
 	"makeWorldReplaceTerrainCmd", "makeWorldSetBulldozableCmd",
+}
+
+-- the ranks of the companies (mpfever_progression.lua), loaded once per Lua state; false when it cannot be loaded
+function C.progression()
+	if C.PG == nil then
+		local ok, m = pcall(ug_require, "mpfever_progression.lua")
+		if not (ok and type(m) == "table") then ok, m = pcall(ug_require, "mpfever_1::/mpfever_progression.lua") end
+		C.PG = (ok and type(m) == "table") and m or false
+	end
+	return C.PG or nil
+end
+
+-- Companies mode: the arguments of a command that name something its company must own (see the bridge's executeAction):
+-- the vehicle, the line, the depot a vehicle is bought in, the entity renamed or recoloured
+C.OWNER_ARGS = {
+	makeVehicleSellCmd = { 1 }, makeVehicleSetLineCmd = { 1, 2 }, makeVehicleSendToDepotCmd = { 1, 2 }, makeVehicleReverseCmd = { 1 },
+	makeVehicleReplaceCmd = { 1 }, makeVehicleSetStoppedByUserCmd = { 1 }, makeVehicleSetManualDepartureCmd = { 1 },
+	makeVehicleTryToDepartCmd = { 1 }, makeVehicleSetModifiersCmd = { 1 }, makeVehicleBuyCmd = { 2 },
+	makeLineUpdateCmd = { 1 }, makeLineDestroyCmd = { 1 }, makeEntitySetNameCmd = { 1 }, makeEntitySetColorCmd = { 1 },
 }
 
 -- Companies mode: a station built by a player is shared with the other companies from the start, at the smallest fee; its

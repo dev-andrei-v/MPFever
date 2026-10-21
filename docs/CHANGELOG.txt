@@ -1,7 +1,273 @@
 MPFever - Changelog
 ===================
 
-0.3.13-experimental - the main menu no longer crashes when MPFever's menu file fails to load
+0.3.22 - no longer "experimental"; replayed stops priced like the tool's; a thanks window when the game closes
+  - The version and the archives lose "-experimental" (MPFever-0.3.22.zip, MPFever-0.3.22-server.zip). The automatic
+    update of 0.3.15 to 0.3.21 takes any MPFever*.zip of the newest release, so they update to it (launcher selftest).
+    The mode « One company per player » stays marked experimental.
+  - FIX: a replayed bus stop or signal paid a quarter of the street or track segment it replaces, where the tool pays
+    nothing for it (#62, second part, pull request #70 by Steelworm). The replay of a tool's stop is now marked, and the
+    native module gives it the tool's refund factor. MPFEVER_REPLACEFREE=0 turns it off. Still seen in a real session: the
+    stop tool charges a fixed multiple of what a replay pays (6x on the test savegame); the refund booking evens it out.
+  - NEW: when the game closes, the launcher stays open behind a small window: thanks, support on Ko-fi, rate on Nexus,
+    star on GitHub, report a problem, close it (Escape) or quit MPFever. The launcher's footer has a « ♥ Support
+    MPFever » link (ko-fi.com/knighthd).
+  - Tests: the dozenew scenario (build then demolish) now works on the host too (other dead ends, refusal reasons
+    logged); conedit no longer rebuilds modular stations by script, which crashed the builder's game.
+
+0.3.21-experimental - stations, stops and street upgrades replayed alike; paused builds shipped; smaller window
+  - FIX: editing a rail station could crash the other games (issues #65, #67). A modular station whose tracks were set
+    to standard or high-speed track was not recognised as a station: its edit was rebuilt by the script forms, then in
+    two steps, and the engine asserted (a segment removed twice, then a missing component). Stations, depots, airports
+    and harbours are now recognised by their construction file, whatever their tracks, and replayed as the tool's own
+    native proposal. If that fails for the edit of an existing station, the host's game is reloaded instead of trying
+    the forms that crash.
+  - FIX: a new station built by a guest was refused on the host's game, again after each resynchronisation (#66): the
+    same detection, the new station now goes the native construction way.
+  - FIX: while the session was paused, a player's own builds could be taken for replays of the other player's builds
+    and never shipped (#64, #66): the player kept a station the others did not have, and the games went out of sync.
+    Each station replay counted one build too many (its conversion command, refused on purpose, never builds); the
+    counts added up while the game time stood still. A replay the engine refuses is now taken off the count.
+  - FIX: a bus stop or a signal replayed on the other games could reshape the street around it (#63: 4 segments and 2
+    nodes there, 1 segment on the builder's game), and every later entity was numbered differently: desyncs on edges,
+    node configurations and owners. The replay now uses the stop tool's own settings (the street graph is not cleaned
+    up). MPFEVER_STOPCLEANUP=1 brings back the old setting.
+  - FIX: a street upgrade whose tool gave its replacement maps is replayed with them (the new segments get the
+    builder's numbers), as the other native builds (#64). MPFEVER_UPGRADEPLAN=1: as before.
+  - FIX: one company per player: the savegame company's rank stood still (#63: the bar stuck at 3332 of 3600) while
+    the game announced a new headquarters level it could not take. Its experience now follows the game's own
+    experience while that one is higher. MPFEVER_RANK1OWN=0: as before.
+  - FIX: refunds of a build demolished within 60 s (#61, found by Steelworm): the native module gives a script's build
+    that carries refundable entities the refund time-out of the tools, so the replays get the same refund as the
+    builder. MPFEVER_REFUNDTIMEOUT=0 turns it off.
+  - FIX: widening a town street (a street upgrade that moves town buildings, with trees) crashed the other games (#65):
+    without the tool's replacement maps it was rebuilt by the script forms, whose lanes the engine asserted on. It is now
+    replayed with the engine's own street upgrade, which moves the same town buildings on every game.
+    MPFEVER_TOWNUPGRADE=0: as before.
+  - FIX: Steam reinstalled in another folder: MPFever read a stale Steam folder from the registry (the mod was installed
+    nowhere, no savegame found). It now takes the first Steam folder that holds steam.exe, then the running Steam's.
+  - NEW: the in-game MPFever window can be reduced to a small card (sync, players, chat) and expanded again, and made
+    narrower or wider with « − / + » (#68).
+  - Connections: TCP keepalive on both sides, so that a connection that died without a word is noticed within about
+    half a minute (#60).
+
+0.3.20-experimental - the lobby shows the mods missing on each player's PC; Windows accounts with accents
+  - NEW: mod check. When the host opens a lobby, its menu reads the mods of the chosen savegame and MPFever sends the
+    list to the players of the lobby. Their multiplayer page shows it under the savegame's picture: the missing mods in
+    red, with their name and origin (Steam Workshop, mod.io...), or "all installed". The host sees the list too.
+  - NEW: the host's game is no longer loaded on a PC where some of its mods are missing (the game would have loaded
+    without them and never matched the host's). The session ends and the page lists the missing mods, which also helps
+    a player who joins a game already running.
+  - NEW: the page, the launcher and the documentation say that MPFever is not made for other mods yet. Mods that change
+    the game by themselves (rename lines, assign terminals, change colours...) do it on each game separately and break
+    the synchronisation (issue #58: Auto Line Namer renamed the lines differently on each game). The README invites mod
+    authors to get in touch so their mods can be made compatible.
+  - FIX: nothing worked on a PC whose Windows account name has letters other than English ones (issue #59: "ö"; also
+    Cyrillic, Chinese...). The game's scripts could not open the files of the session folder, made in the user's
+    temporary folder: no Multiplayer button, no session. The session folder is now on a path the game can read: the
+    temporary folder's short (8.3) name, else C:\ProgramData\MPFever\sessions.
+
+0.3.19-experimental - tram tracks added to a street join the crossings on every game
+  - FIX: tram tracks added to an existing street (or taken from it) with the street tool reached the crossings only on the
+    game of the player who built them. The other games replayed the change as a street upgrade (the engine's
+    replaceSegment): the street got its tracks, but the crossings kept the lane connections of a street without tram, so
+    the tracks stopped at every crossing and trams could not turn or go straight on. The tool also changes the crossings'
+    lane connections (node configurations): such a change (same street type, other lanes) is now replayed from the tool's
+    own proposal, node configurations included. Upgrades to another street type are replayed as before.
+
+0.3.18-experimental - a new multiplayer page in the main menu
+  - NEW: the small MPFever window of the main menu is replaced by a full page in the game's own style (the frame, title
+    bar and back button of « Load Game »), opened by a « Multiplayer » card at the top left of the main menu.
+    - « Host a game » tab: the savegames as tiles with their picture, name and date, five per row, with a filter by name;
+      « Host » under a savegame opens the lobby. The company mode is chosen above them with two large buttons (the
+      experimental mode says so in orange).
+    - « Join a game » tab: the host's address and the password of a dedicated server, then « Join »; a reminder that a
+      Steam friend can be joined from the friends list.
+    - While something runs (lobby, connection, download, loading), the page shows it: the savegame's picture, what
+      happens, a progress bar for the host's game being received, the players (the host marked), and the buttons « Start
+      the game », « Invite Steam friends », « Close the lobby » / « Leave the lobby » / « Cancel ».
+    - The last error (cannot connect, lobby closed...) shows in red above the tabs.
+    - The host's lobby shows the address to give to the other players: the public address (IPv4, and IPv6 when the PC
+      has one), the TCP port to forward on the router, and the local network address. Before, only the local addresses
+      were written (the public IPv6 among them, called local).
+    - Your player name is at the top right of the page; the first time, it is your Steam name.
+    - A session started without the page (a Steam invitation accepted) opens it by itself; the page leaves when the game
+      loads. Escape or « Back » returns to the main menu.
+  - Translations: the page's texts in the 11 other languages.
+
+0.3.17-experimental - 0.3.16 did not start a game
+  - FIX (issue #56): in 0.3.16 the game never started: both games loaded the savegame, then nobody was ready. The mod's main
+    file had two local variables more than the game allows (Lua's 200 in a file's main chunk, of which the game takes
+    about 8): it did not load at all ("too many local variables"). Constants and counters of the file are now in tables (17
+    locals free instead of 6), and tests/test_locals.py checks every file of the mod keeps at least 12 free. Everything
+    0.3.16 fixed (issues #51, #53, #54) comes with it.
+
+0.3.16-experimental - desyncs and a crash after reloads, frozen station edits
+  - FIX (issue #53, crash of every game): what a replicated action creates (a line, a vehicle) is known on every game by a
+    key, which was the action's uid alone; the uid's counter starts again from 0 at every load and every resynchronisation,
+    while the keys stay in the savegame. A line of an earlier session had the same key as a new one: an update of the old
+    line reached the new one after it was removed, and every game crashed (assertion 'it != components.end()', Line). The
+    key is now the uid and the action's stamp; a key bound again no longer names the entity it named before; a key whose
+    line or vehicle is gone is never resolved to it (the action is skipped).
+  - FIX (issue #51, desyncs): the same reused keys in the host's report: 55 keys named two to five vehicles or lines over
+    the session, so an action on an older vehicle or line could reach another one on the other game (the "lines,names"
+    resynchronisations, part of the "vehicles" ones).
+  - FIX (issue #51, desyncs): the game scripts' draws (math.random) counted every draw of a game time together. Something
+    drew at every frame of a pause, as many times as each machine showed frames (81 draws before a player's three loans,
+    measured on the client): the loans' delays, and every later draw of that time, differed between games. Each place in
+    the code (file name and line) now counts its own draws; math.randomseed(n) is followed (the construction scripts seed
+    from their parameters). The files' folders are left out (they differ between machines).
+  - FIX (issue #54, the game stopped for about 30 s at each track added to a station): editing a station sends the whole
+    station (850 KB). The launcher read it for its log with a copy of the rest of the text at every true/false/nil (31 s;
+    0.06 s now), and that player's messages, their clock among them, waited: every game stood still meanwhile.
+  - DIAGNOSTIC (issue #51): the state dumps of the checks (sdump_ring_*.txt, in the problem report) also list every vehicle
+    (line and place), every line's stops, the names of stations, lines and vehicles, and every station with its construction
+    and place: two players' reports show the first one that differs.
+
+0.3.15-experimental - refunds, automatic updates, problem reports, smooth pacing, port opening, ranks per company
+  - FIX (issue #50, resynchronisations after builds): an airport, an airfield or a terminal built by another player (signs:
+    edge objects on the construction's own runways and taxiways) reloaded the host's game for everybody each time (4 of
+    the report's 6 resynchronisations). Their edge objects now go in the replay's own proposal, as the tool's build has
+    them (the segments keep the tool's placeholders, the objects name their segments by the tool's ids); the count is
+    checked once built. A script cannot write a native edge object's model ("no writable member 'model'", second report):
+    the objects are the engine's own, from its conversion of the construction (the dry run the replay already makes, which
+    has them once per converted copy: 30 for an airport's 10 in the third report), matched by segment id and model, then
+    model, place and side, then model, then by rank within the first copy (the fourth report: model, place and side
+    matched none; the replay now logs both objects when none matches). If
+    that fails, or the count differs, the host's game is reloaded as before. Checked by two players: airports built by the
+    host and by the client, replayed with their signs, no resynchronisation. MPFEVER_CONEO=0 turns it off.
+  - NOTE (issue #50, refunds): a resynchronisation reloads the game, and the game forgets what can be refunded: an airport
+    built just before one (the second report: built at 09:30:00, resynchronisation at 09:30:02, demolished at 09:30:51)
+    is no longer refunded. Fewer resynchronisations after airports means fewer lost refunds. A removal that refunds
+    nothing costs its builder 0 and its replays 3 000 to 450 000: that difference is booked as before (not booking it, as
+    tried in between, put the money of the shared company apart at once).
+  - DIAGNOSTIC (issue #50, frame rate): the launcher writes the game's memory in its log every 5 minutes. In the third
+    report (both games on one PC) the frame rate fell from about 66 to 15 images/s on both games right after the fifth
+    resynchronisation (each reloads a 165 MB savegame), and the game logged "Thread did not respond to ping" from then on.
+  - DIAGNOSTIC (issue #50): "build ids" also says how many of the build's new nodes have a node configuration, to find
+    which build left the host with 2 fewer than the client (7418 / 7420, after a station of 200 nodes).
+  - FIX (issue #49, crashes): an airport or an airfield built by another player was replayed, then its 9 signs (edge
+    objects on its runways and taxiways) were placed again by rebuilding each of those segments, as 0.3.13 did. They are the
+    construction's own segments: the construction kept the removed ones, and the game crashed as soon as it was selected
+    (assertion 'it != components.end()' in ecs::Engine::GetComponentDataIndex, BaseEdge, UI::CSelector) or demolished
+    (the engine's removal threw). The signs were also placed over 6 steps (a desync). A construction's segment is never
+    rebuilt now: the host's game is reloaded for everybody at once instead, and a replay the engine throws on does the
+    same (and since the fix of issue #50 above, the signs are replayed with the construction). A savegame written after such a replay (a crash save, MPFever resync.sav) keeps the broken construction: go back to an
+    earlier one.
+  - FIX (issues #46, #47): demolishing what one has just built refunded it on the builder's game only (a heliport: -2 190 453
+    there, +36 162 on the host's); the host's money then went to everyone. What a native build cost its builder is now
+    shipped with it; every replaying game adds up what its replay cost and books the difference on the builder's company
+    at its next step, so every game charged what the builder's game charged. Until the booking is applied it counts as
+    booked in the checks (no false money difference). Logged as "refund:". MPFEVER_NOREFUND=1 turns it off (on every game).
+  - NEW: automatic updates (from PR #45, SlikerDev): at startup, and every 30 minutes, the launcher asks GitHub for the
+    newest release. Found at startup it is installed at once (downloaded, checked against GitHub's SHA-256, MPFever's
+    files replaced, settings and logs kept, MPFever started again); found later, when the game closes; a dedicated server
+    saves its world, installs it and starts again once nobody has been connected for 2 minutes. The host tells its players
+    in the chat. A server takes the server archive, a player the players' one. autoupdate=ask asks first, autoupdate=0
+    turns it off.
+  - NEW: "Report a problem (logs)" in the in-game MPFever window, "Report a problem" in the launcher, and offered after a
+    crash of the game: every log (session folders, launcher logs, the game's stdout.txt and the previous one, the newest
+    crash dump, the session's state) in one zip (reports\ next to MPFever.exe), shown in the Explorer, and a new GitHub
+    issue opened with its text filled in (version, game build, company mode, players, sync state, processor). The player
+    drags the zip into it and sends: GitHub creates no issue and takes no file without an account of the player's own (a
+    key shipped in MPFever would let anyone post in the project's name). The game's stdout.txt is now kept: copied into the
+    session folder when the game closes, the previous one into logs\stdout-previous.txt before the game starts.
+  - NEW: smooth pacing (ported from TPF3-MP's batch interval, MIT): a game that came up to the slowest player's clock used
+    to stand still until that clock moved, then run at full speed again (vehicles moved, stopped, moved: issue #47's
+    dedicated server). The native module now redirects CGame::Step's call of CGame::Sync and, right after each Sync,
+    scales the engine's batch interval (guiFrameTime) by a factor the mod writes in native_pace.txt: up to 2 (half speed)
+    as the game comes within a batch and a half of the barrier, 1 otherwise. Only the real time between batches changes:
+    every game runs the same steps at the same game times. On a model of two games (the other 15 to 50 % slower, 50 to
+    300 ms apart) no stop was left at 1x and 2x up to 30 % slower, and fewer at 4x. MPFEVER_SMOOTH=0 turns it off.
+  - NEW: the host's port is opened on the router by itself while a session runs (UPnP, else NAT-PMP), and closed again
+    when it ends; the launcher's log says whether it worked, and when the router has no public address (CGNAT, as in issue
+    #47) it says that nobody outside can reach it over IPv4. upnp=0 turns it off.
+  - NEW: the native module's engine places by signature. On a game build it does not know (a game update), every place is
+    found again by its signature (mpfever_sigs.txt next to MPFever.exe, made by tools/mksigs.py from the last known build;
+    each must match exactly once, each feature needs all of its own and stays off without them, native.log lists what was
+    found). Lua's string hash seed fix, the game scripts' pool, the menu page, the order fixes, the tools' company and the
+    smooth pacing are found by their own signatures whatever the build. MPFEVER_SIGTEST=1 resolves by signature on a known
+    build too (to check the file). The structure offsets inside the engine are still those of build 40420.
+  - SEPARATE COMPANIES (ported from TPF3-MP's companies.mayTouch, mayBuyAtDepot and progression, MIT):
+    - what belongs to another company is refused the same on every game, naming its owner: selling, sending to a line or a
+      depot, editing or deleting its vehicles and lines, renaming or recolouring them or its stations, buying a vehicle in
+      its depot. What belongs to no company (towns' streets) stays everyone's. MPFEVER_NOOWNERGUARD=1 turns it off.
+    - each company has its own rank: its score is the sum over the towns of population x its share of what was carried
+      there (cargo delivered, passengers) x its rating there, taken four times a game month at the same game time on every
+      game, from the simulation's state; experience is the highest score, the rank the game's own thresholds. The company
+      window shows each company's own rank and permits, and takes a rank reached for that company ("ranks:" in mod.log).
+      Before, every company read the savegame company's rank.
+
+0.3.14-experimental - determinism and tools fixes ported from TPF3-MP; separate companies: stops
+  - FIX (separate companies): a stop another player placed on their own street was rebuilt on the other games with a
+    street segment that belonged to nobody (the replay did not copy the segment's owner, playerOwned), and the stop's
+    builder paid differently: "owners" desync, then a resynchronisation (manual test, Test Multi 3). The replay now gives
+    the segment the owner the stop tool kept. Checked by replaying that test's road and stop on Test Multi 3: the
+    segment belongs to the client's company, as on the client's game.
+  - FIX (issue #47, separate companies): right after a resynchronisation, a player's builds could belong to the savegame's
+    company (the host's). The mod told the native module which company the game plays as soon as the game was loaded, and
+    the native module forgot it a second later, when the new game state applied its first command (on purpose: entity ids
+    of the old game mean nothing in the new one); the mod said it again only 7 to 15 s later. Now it says it every 30 frames
+    during the first 1200 frames of a game. Probably also the cause of objects the bulldozer would not remove (they belonged
+    to the other company).
+  - DETERMINISM (ported from TPF3-MP by Juliansgith, MIT, github.com/Juliansgith/Transport-Fever-3-Multiplayer-Mod; the
+    person-order fixes come from silver2127's TPF2 Multiplayer): the native module sorts by entity id six batches the
+    simulation reads in an order that is the engine's history rather than the world's state: the ids freed by each
+    modification before they join the free-id queue (the ids new entities get: in a manual test the same station's
+    segments had other ids on the two games), the vehicles that want track before the seeded shuffle that decides which
+    reserves first, the persons and cargo leaving buildings, the persons arriving on foot, the destination candidates and
+    the vehicles at a line stop. And the simulation's seeds taken from GameTime.tickCount (the shuffle above, a vehicle
+    variant pick, town and street development) now use the step count: tickCount also counts the frames a game stands
+    still, a different number on every game of a session (TPF3-MP's "paused-tick" fix does the same by not counting
+    them; here tickCount itself is kept, the mod's stillness checks read it). MPFEVER_NOORDER=1 turns all of it off (on
+    every game). Checked: an autotest on two games, every check identical, the counters in native.log ("order fixes:").
+  - SEPARATE COMPANIES (ported from TPF3-MP's "The tools' player"): the tools kept the savegame company's player (handed
+    to them once when the game's interface is made), so for a player of another company the bulldozer would not offer the
+    company's own roads, stops and buildings, and the street tool snapped only to the ends of the company's roads (issue
+    #47). At each tool's step a field still holding the savegame company now gets this machine's company: street and track
+    builder, track modifiers, construction, stop/signal/waypoint and module builders, and the bulldozer (its player, its
+    owner list and its filter's). MPFEVER_NOTOOLCO=1 turns it off. Manual test: the client bulldozed its own road and stop.
+  - NOT FIXED YET: demolishing what one just built refunds it on the builder's game only (manual test: a heliport,
+    -2 190 453 on the builder's game, 36 162 on the host's; the host's money is then applied to everyone). The tool puts
+    the interface's refundable entities (api.gui.construction.getRefundableEntities(): {entity, -1} = {revision,
+    updateCount}) in its Context. The list is now shipped with each native build and put into the replay's Context
+    (Context.refundableEntities, with this game's revision when it equals the builder's), but in the refundprobe autotest a
+    scripted removal with that list still cost the same (1244) as without: the engine does not take it from a scripted
+    Context. Left in, without effect; the list is logged ("refundable entities").
+  - The icon of a deleted stop stays about 80 s at x1 (StationGroupSystem: an empty station group expires 20 game days of
+    4000 ms later), as in the game without MPFever; seen in a manual test, gone on both games at the same step.
+  - makeTownDevelopAtCmd (sent by no stock script) is refused in a session: the engine seeds it from the C library's
+    rand(), seeded with the clock, so every game would develop the town differently (TPF3-MP's RNG survey).
+
+0.3.13-experimental - the main menu no longer crashes when MPFever's menu file fails to load; electrified rail stations
+  - FIX (issue #46): a rail station with electrified tracks built by another player was refused on the other games
+    ("Construction Not Possible" in every form, then a resynchronisation). Its tracks use simple_catenary.street_template,
+    which the replay did not recognise as the station's own tracks (only simple.street_template), so the station did not
+    take the exact native construction replay. Checked: the station of the issue's log (modular cargo station, 2 tracks,
+    catenary, 48 segments) replayed at 6 places of a large savegame: built 5 times with its 48 segments, refused once
+    for a real collision with a road.
+  - FIX: on a large map, the first big builds of a session took their builder's game 4 to 74 s to capture (the first
+    six native proposals were written in full to raw_builds.txt, a diagnostic). Past 900 frames the build counted as
+    refused, the others stopped holding for it, then received it late: drift and a resynchronisation (manual test on
+    Leawood). The dump is now only written with MPFEVER_RAWBUILDS=1.
+  - FIX: airports (runways and taxiways) and rail depots built by another player take the exact native construction
+    replay, like stations (an airport was refused in every form). An airport's signs are edge objects on its taxiways:
+    the replay now logs whether they are all there too. Not tested yet.
+  - FIX: an airport replayed natively had no signs (9 edge objects on its taxiways, the engine's conversion does not make
+    them): they are now placed afterwards on their segments, as stops are. Seen in a manual test (resynchronisation on
+    edgeObjects 346 / 355).
+  - FIX: a street through a town (town buildings moved) with the tool's replacement maps takes the native street
+    proposal, without the buildings: this game's engine takes the same ones away. Rebuilt by the script forms it was
+    laid otherwise (cost 13.8 M instead of 8.4 M, 44 town buildings taken away instead of 35) and the towns drifted.
+    Checked with the towncross autotest: every street replayed natively, in sync.
+  - FIX (issue #47): a vehicle replacement is made when the vehicle reaches a depot; the command was reported as
+    refused on every game ("created entity not found") after 10 steps.
+  - AUTOTEST: a game that crashed during the test (process closed, or no clock for 120 s: a crashed game can stay open
+    after writing its crash save) now ends the test as "FAILED (a game closed)" instead of "IN SYNC". replayfile: an act
+    with shift = {x, y} is moved there (at the height of the ground) to replay a player's build on another savegame.
+  - NOTE (not MPFever): bulldozing a dead-end street with the engine's own removal proposal from a script can crash the
+    game (assertion AreAllNodesEmpty in TransportNetworkSystem.cpp:635), also with MPFever not active. Seen on a large
+    savegame from mod.io (Leawood); reported here so that crashes with that assertion are not taken for MPFever's.
   - FIX: when mpfever_menu.lua (or mpfever_pause.lua) failed to load, the game crashed at start with "module
     'mpfever_1::/gui/main/react.lua' not found". The game's require (base/init.lua) puts the file's path on its
     require stack before loading it and only takes it off when the file ran to its end: our failed file stayed on it,

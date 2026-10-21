@@ -196,6 +196,12 @@ struct Site {
 #include "sites_gog.h"
 enum { RULE_COUNT = 0, RULE_SIM = 1, RULE_UI = 2, RULE_NOTSIM = 3, RULE_SIMTHREAD = 4, RULE_UIOBJ = 0x10 };
 static const int NSITES = (int)(sizeof(SITES20C) / sizeof(SITES20C[0]));
+// the readings hooked: those of build 40420 (sites20c.h), or on a build known by its signatures only, those found again
+static Site20c g_s20dyn[96];
+static u8 g_rule20dyn[96];
+static const Site20c* g_s20 = SITES20C;
+static int g_n20 = NSITES;
+static bool g_s20FromSigs = false;
 static volatile i64 g_siteCount[64][4];    // per site: interface, simulation, other thread; [3] interface-object readings moved
 static u8 g_siteRule[64];
 
@@ -331,8 +337,8 @@ static const u32 UI_SITES_40420[] = {
     0x5bf08d,   // UI::TrackModifier::Build
     0x28a3024, 0x28a3871,   // entity window builtins
 };
-// GOG build (stamp 0x6ab3eec7, a few days before 40408; same functions, found again with the call graph: the distances between
-// the sites of one function are those of 40408)
+// GOG build (stamp 0x6ab3eec7, game build 40393, a few days before 40408; same functions, found again with the call graph: the
+// distances between the sites of one function are those of 40408)
 static const u32 UI_SITES_GOG[] = {
     0x4d482f,   // UI::Bulldozer::Apply
     0x51c39c,   // UI::ConstructionBuilder::MousePressed
@@ -349,24 +355,16 @@ static int UI_ADD_N = (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0]));
 
 // The engine functions the native module hooks, per game build (TransportFever3.exe's link timestamp). Any other build:
 // the hooks stay off (the main menu page and the script pool patch are found by their code instead, see below).
-// The companies mode needs the rest (repl ... words): 0 / null where a build does not have them (words: null = the rvas of sites20c.h).
 struct BuildAddrs {
     u32 stamp;
     u32 add, move, dtor, handleDtor, apply, swap, sync, preIter, lua, pool, loopRet;
     const u32* sites; int nSites;
-    u32 repl, replLoop, moneyCheck, lines, makeSeed;
-    const u32* words;
 };
 static const BuildAddrs BUILDS[] = {
-    { 0x6ab69fe5, 0x9d29c0, 0x9cedb0, 0x9ceff0, 0x30393d0, 0x9e1c10, 0x9d2d20, 0x11f650, 0x157860, 0x2fbdf70, 0xaaec2c, 0x11eb9b, UI_SITES_40408, (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0])),
-      0, 0, 0, 0, 0, 0 },   // 40408
-    { 0x6ac50427, 0x9d4040, 0x9d0430, 0x9d0670, 0x3040c90, 0x9e33b0, 0x9d43a0, 0x11f690, 0x1578a0, 0x2fc58c0, 0xab00fc, 0x11ebdb, UI_SITES_40420, (int)(sizeof(UI_SITES_40420) / sizeof(UI_SITES_40420[0])),
-      0x255e60, 0x11ea9f, 0xccfbd0, 0x7f5c60, 0x2fc8fe0, 0 },   // 40420
-    { 0x6ab3eec7, 0x9d2b70, 0x9cef60, 0x9cf1a0, 0x303b510, 0x9e1de0, 0x9d2ed0, 0x11f990, 0x157ba0, 0x2fbf230, 0xaaedbc, 0x11eedb, UI_SITES_GOG, (int)(sizeof(UI_SITES_GOG) / sizeof(UI_SITES_GOG[0])),
-      0x256120, 0x11ed9f, 0xccf850, 0x7f4020, 0x2fc2950, SITES20C_GOG },   // GOG
+    { 0x6ab69fe5, 0x9d29c0, 0x9cedb0, 0x9ceff0, 0x30393d0, 0x9e1c10, 0x9d2d20, 0x11f650, 0x157860, 0x2fbdf70, 0xaaec2c, 0x11eb9b, UI_SITES_40408, (int)(sizeof(UI_SITES_40408) / sizeof(UI_SITES_40408[0])) },   // 40408
+    { 0x6ac50427, 0x9d4040, 0x9d0430, 0x9d0670, 0x3040c90, 0x9e33b0, 0x9d43a0, 0x11f690, 0x1578a0, 0x2fc58c0, 0xab00fc, 0x11ebdb, UI_SITES_40420, (int)(sizeof(UI_SITES_40420) / sizeof(UI_SITES_40420[0])) },   // 40420
+    { 0x6ab3eec7, 0x9d2b70, 0x9cef60, 0x9cf1a0, 0x303b510, 0x9e1de0, 0x9d2ed0, 0x11f990, 0x157ba0, 0x2fbf230, 0xaaedbc, 0x11eedb, UI_SITES_GOG, (int)(sizeof(UI_SITES_GOG) / sizeof(UI_SITES_GOG[0])) },   // GOG (40393)
 };
-static u32 RVA_MONEYCHECK = 0, RVA_LUA_MAKESEED = 0;
-static const u32* g_wordRvas = 0;
 static bool SelectBuild(u32 stamp);
 static u32 g_knownLua = 0, g_knownPool = 0;
 
@@ -448,7 +446,8 @@ static void EntFlush();
 // What the simulation thread reads as the player: the savegame's company, or, while a build is applied, the company in the build's
 // context (the engine checks that company's money, not the savegame's: a player could not build when the host was out of money)
 static volatile long g_simPlayer = 0;
-static volatile long g_moneyFixed = 0;      // money checks of the tools moved to this machine's company (see MoneyCheckDetour)
+static volatile long g_moneyFixed = 0;
+static volatile long g_trim = 1000, g_paceWrites = 0, g_paceOff = 0;   // smooth pacing (see SyncCallWrap)      // money checks of the tools moved to this machine's company (see MoneyCheckDetour)
 static long g_canonTok = 0;
 typedef void (*ClearPosF)(void* world, u32 player);
 static ClearPosF g_clearPos = 0;
@@ -642,7 +641,7 @@ extern "C" u64 SyncDetour(void* a, void* b)
 typedef void* (*LinesF)(void*, void*, void*, void*, void*, u32, void*, void*);
 static LinesF g_linesOrig = 0;
 static const u8 P_LINES[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18, 0x48, 0x89, 0x78, 0x20, 0x55 };
-static u32 RVA_LINES = 0;
+static u32 RVA_LINES = 0x7f5c60;
 static volatile long g_linesShown = 0;
 typedef u64 (*SwapF)(void*, void*);
 static SwapF g_swapOrig = 0;
@@ -913,11 +912,13 @@ static void EntFlush()
     }
 }
 
+static void LogOrderCounts();
 static void AuditFlush(bool force)
 {
     DWORD now = GetTickCount();
     if (!force && now - g_auditTick < 10000) return;
     g_auditTick = now;
+    { static int n = 0; if (force || ++n % 6 == 0) LogOrderCounts(); }
     for (int k = 0; k < 128; k++) {
         u32 tot = g_kcLoop[k] + g_kcDir[k];
         if (tot == g_kcSeen[k]) continue;
@@ -925,14 +926,15 @@ static void AuditFlush(bool force)
         Buf l; l.str("audit kind ").dec(k).str(" loop ").dec(g_kcLoop[k]).str(" direct ").dec(g_kcDir[k]);
         LogLine(l);
     }
-    for (int i = 0; i < NSITES && i < 64; i++) {
+    for (int i = 0; i < g_n20 && i < 64; i++) {
         i64 m = g_siteCount[i][0], s = g_siteCount[i][1], o = g_siteCount[i][2], u = g_siteCount[i][3];
         if (m + s + o == 0) continue;
-        Buf l; l.str("word read at ").hex(SITES20C[i].rva).str(" rule ").dec(g_siteRule[i]).str(": interface ").dec((long)m).str(" simulation ").dec((long)s).str(" other ").dec((long)o);
+        Buf l; l.str("word read at ").hex(g_s20[i].rva).str(" rule ").dec(g_siteRule[i]).str(": interface ").dec((long)m).str(" simulation ").dec((long)s).str(" other ").dec((long)o);
         if (u) l.str(" interface object ").dec((long)u);
         LogLine(l);
     }
     if (g_moneyFixed) { Buf l; l.str("money checks of the tools for this machine's company: ").dec(g_moneyFixed); LogLine(l); }
+    if (g_paceWrites || g_trim != 1000) { Buf l; l.str("smooth pacing: batch interval scaled ").dec(g_paceWrites).str(" time(s), factor now ").dec(g_trim).str("/1000").str(g_paceOff ? " (OFF: layout not as expected)" : ""); LogLine(l); }
     EntFlush();
 }
 
@@ -1488,6 +1490,45 @@ extern "C" void* AddDetour(void* list, void* out, void* cmd, void* done, void* p
             }
         }
     }
+    {   // Refunds (issue #61, found by Steelworm): a Context's refund time-out (float at +0x364, then the refund factor 0.75 at
+        // +0x368 and the size of refundableEntities at +0x380) is the game's bulldozeRefundTimeOut (60 s) in a tool's command
+        // but 0 in a script's, and with 0 the engine ignores the list. The replays carry their builder's list (G.refundInto):
+        // a script's world-build command whose Context holds entries gets the tools' time-out, learned from a tool's command.
+        // MPFEVER_REFUNDTIMEOUT=0 turns it off. Offsets of build 40420.
+        static float refundTimeOut = 60.0f;
+        static int refundOn = -1;
+        if (refundOn < 0) { char v[4]; refundOn = (GetEnvironmentVariableA("MPFEVER_REFUNDTIMEOUT", v, 3) > 0 && v[0] == '0') ? 0 : 1; }
+        u8* pay = cmd ? *(u8**)cmd : 0;
+        if (refundOn && pay && Readable(pay, 0x9c0) && *(u8*)(pay + 0x9b8) == 52) {
+            float* to = (float*)(pay + 0x364);
+            u64 nRefund = *(u64*)(pay + 0x380);
+            if (IsUiSite(caller)) {
+                if (*to > 0.0f && *to < 100000.0f) refundTimeOut = *to;
+            } else if (*to == 0.0f && nRefund > 0 && nRefund < 100000) {
+                *to = refundTimeOut;
+                static long shownR = 0;
+                if (shownR++ < 20) { Buf b; b.str("refund time-out ").dec((int)refundTimeOut).str(" s given to a script's build with ").dec((int)nRefund).str(" refundable entities"); LogLine(b); }
+            }
+        }
+    }
+    {   // Replayed stops and signals (issue #62): a segment a build replaces costs a script's command a quarter of its price (the
+        // engine charges the new segment minus the Context's refund factor, +0x368, 0.75, times the replaced one's price), where the
+        // tools' commands pay nothing for it. The factor is not in the Context a script can write, so the bridge marks the command of a
+        // replayed stop or signal of a tool (doDust, +0x9b0, set together with playerInitiated, +0x3d2: the game's own scripts and no
+        // other build of this mod do that, see G.toolCosts; a mod's own GUI command that did would be priced so too, on every game):
+        // its refund factor becomes 1.0 (a segment replaced by one of the same price is free, a dearer one pays the difference) and
+        // doDust is cleared again (the stop tool's own command has it off). The factor also weighs the refunds of removed segments that
+        // replace nothing; the replays marked remove none. Offsets of build 40420. MPFEVER_REPLACEFREE=0 turns it off.
+        static int replaceFree = -1;
+        if (replaceFree < 0) { char v[16] = {}; DWORD n = GetEnvironmentVariableA("MPFEVER_REPLACEFREE", v, sizeof(v)); replaceFree = (n == 1 && v[0] == '0') ? 0 : 1; }
+        u8* pay = cmd ? *(u8**)cmd : 0;
+        if (replaceFree && !IsUiSite(caller) && pay && Readable(pay, 0x9c0) && *(u8*)(pay + 0x9b8) == 52 && pay[0x9b0] && pay[0x3d2]) {
+            *(float*)(pay + 0x368) = 1.0f;
+            pay[0x9b0] = 0;
+            static long shownF = 0;
+            if (shownF++ < 20) { Buf b; b.str("replaced segment free (refund factor 1.0) on a marked stop or signal build (doDust)"); LogLine(b); }
+        }
+    }
     if (g_dumpOn) { u8* pay = cmd ? *(u8**)cmd : 0; if (pay && Readable(pay, 0x9c0) && *(u8*)(pay + 0x9b8) == 52) { char t[16]; Buf tb; tb.str("c").hex(caller); for (int i = 0; i < tb.n && i < 15; i++) t[i] = tb.s[i]; t[tb.n < 15 ? tb.n : 15] = 0; DumpPayload(pay, t); } }
     if (IsUiSite(caller)) {
         u8* pay = cmd ? *(u8**)cmd : 0;
@@ -1898,21 +1939,308 @@ static bool ColdJoin()
 }
 
 
+// the simulation's calls of CGameTime's tickCount getter (build 40420; found again by their signatures on another build)
+static u32 g_simCalls[16] = { 0x900170, 0x90edc0, 0x96ad13, 0xa38dda, 0xa7db6d, 0xac2dd3, 0x2698385 };
+static int g_nSimCalls = 7;
+static u32 g_uiDyn[32];
+static u32 RVA_LUA_MAKESEED_SIG = 0;     // makeseed found by its signature
+static u32 RVA_MONEYCHECK = 0xccfbd0;                                  // the tools' money check (build 40420, see MoneyCheckDetour)
+static u32 RVA_ADDENTITY = 0x2bb8940, RVA_REMOVEENTITY = 0x2bbc700;     // ecs::Engine::AddEntity / RemoveEntity (build 40420)
+// the readings of the local-player word that PatchPlayerReads redirects (build 40420; 0 when not found on another build)
+static u32 g_playerRva[5] = { 0x24f0a18, 0x24da741, 0x67b955, 0x86917c, 0x24e7d66 };
+
+static int HexVal(char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; }
+
+// a signature ("48 8B ?? ..."): its rva when it is found once in the code, else 0
+static u32 FindSigRva(const char* sig)
+{
+    u8 pat[96]; bool any[96]; int n = 0;
+    for (const char* q = sig; *q && n < 96; ) {
+        while (*q == ' ') q++;
+        if (!*q) break;
+        if (q[0] == '?') { any[n] = true; pat[n++] = 0; q += 2; continue; }
+        any[n] = false; pat[n++] = (u8)(HexVal(q[0]) * 16 + HexVal(q[1])); q += 2;
+    }
+    auto dos = (IMAGE_DOS_HEADER_*)g_base;
+    u8* ntp = (u8*)(g_base + dos->e_lfanew);
+    auto fh = (IMAGE_FILE_HEADER_*)(ntp + 4);
+    auto sec = (IMAGE_SECTION_HEADER_*)(ntp + 4 + sizeof(IMAGE_FILE_HEADER_) + fh->SizeOfOptionalHeader);
+    u32 found = 0; int count = 0;
+    for (int i = 0; i < fh->NumberOfSections; i++) {
+        if (!(sec[i].Name[0] == '.' && sec[i].Name[1] == 't' && sec[i].Name[2] == 'e' && sec[i].Name[3] == 'x')) continue;
+        u8* start = (u8*)(g_base + sec[i].VirtualAddress);
+        u64 size = sec[i].VirtualSize;
+        for (u64 k = 0; k + n <= size; k++) {
+            if (start[k] != pat[0]) continue;
+            int j = 1;
+            while (j < n && (any[j] || start[k + j] == pat[j])) j++;
+            if (j == n) { if (!count) found = (u32)(sec[i].VirtualAddress + k); count++; }
+        }
+    }
+    return count == 1 ? found : 0;
+}
+
+// ---------------------------------------------------------------- targets by signature (a game build this module does not know)
+// The known builds (BUILDS) name every engine place by its address. On another build (a game update) each place is found
+// again by its signature: mpfever_sigs.txt, made by tools/mksigs.py from the last known build and shipped with MPFever (the
+// launcher gives its path in MPFEVER_SIGS). A place counts only when its signature matches exactly once in the game's code;
+// each feature needs all of its places and stays off without them (fail closed), the others still work. A few signatures
+// are built in, used when the file has none for their place: the determinism fixes that matter most (Lua's string hash
+// seed) and TPF3-MP's for the batch interval (profiles/tf3_build40420_steam_windows/hooks.toml, MIT).
+// MPFEVER_SIGTEST=1 resolves by signature on a known build too (to check the file: native.log says what it found where).
+
+struct SigPlace { char key[16]; int off; u8 pat[128]; u8 any[128]; int n; int rule, dst, base, len; u32 rva; int hits; };
+static SigPlace* g_sigs = 0;
+static int g_nSigs = 0;
+static bool g_bySig = false;           // this build's places come from their signatures
+static bool g_layout = false;          // the places of build 40420's separate-companies features (the word's readings, tools...)
+static char g_sigReport[2048];
+static int g_sigReportN = 0;
+static void SigNote(const char* t) { while (*t && g_sigReportN < (int)sizeof(g_sigReport) - 2) g_sigReport[g_sigReportN++] = *t++; }
+static void SigNoteDec(long v) { Buf b; b.dec(v); b.s[b.n] = 0; SigNote(b.s); }
+
+static const char* const BUILTIN_SIGS[] = {
+    "makeseed 0 40 53 48 83 EC 50 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 48 48 8B D9 33 C9",
+    "lua 0 48 89 5C 24 10 56 48 83 EC 50 49 8B D9 48 8B F1",
+    "scriptpool 0 83 F8 08 0F 8D ?? ?? ?? ?? C7 44 24 20 01 00 00 00 E8",
+    "preIter 0 48 8B 49 08 8B 91 0C 02 00 00 48 8B 49 18 E9",
+    "sync 0 48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 4C 8B F2 48 8B D9",
+    "cgameStep 0 40 53 48 83 EC 20 48 8B 81 F0 01 00 00 48 8B D9",
+    "syncCall 20 48 63 BA 18 02 00 00 48 8B CB 48 03 BA A8 01 00 00 48 8B D6 E8 ?? ?? ?? ?? 84 C0 74",
+};
+
+// one line: "<key> <offset> <signature>" or "site20c <rule> <dst> <base> <len> <offset> <signature>"
+static bool SigParse(const char* l, int len, SigPlace& p)
+{
+    memset(&p, 0, sizeof(p));
+    int i = 0, k = 0;
+    while (i < len && l[i] == ' ') i++;
+    while (i < len && l[i] != ' ' && k < 15) p.key[k++] = l[i++];
+    if (!k || p.key[0] == '#') return false;
+    auto num = [&](int& out) { while (i < len && l[i] == ' ') i++; int v = 0; bool any = false; while (i < len && l[i] >= '0' && l[i] <= '9') { v = v * 10 + (l[i++] - '0'); any = true; } out = v; return any; };
+    bool site = memcmp(p.key, "site20c", 8) == 0;
+    if (site && !(num(p.rule) && num(p.dst) && num(p.base) && num(p.len))) return false;
+    if (!num(p.off)) return false;
+    while (i < len && p.n < 128) {
+        while (i < len && l[i] == ' ') i++;
+        if (i + 1 >= len) break;
+        char a = l[i], b = l[i + 1];
+        if (a == '?') { p.any[p.n] = 1; p.pat[p.n++] = 0; }
+        else if (((a >= '0' && a <= '9') || ((a | 32) >= 'a' && (a | 32) <= 'f')) && ((b >= '0' && b <= '9') || ((b | 32) >= 'a' && (b | 32) <= 'f'))) { p.any[p.n] = 0; p.pat[p.n++] = (u8)(HexVal(a) * 16 + HexVal(b)); }
+        else return false;
+        i += 2;
+    }
+    return p.n >= 4 && !p.any[0];
+}
+
+static bool SigHave(const char* key)
+{
+    for (int i = 0; i < g_nSigs; i++) if (memcmp(g_sigs[i].key, key, 16) == 0) return true;
+    return false;
+}
+
+static void LoadSigs()
+{
+    if (g_sigs) return;
+    g_sigs = (SigPlace*)HeapAlloc(GetProcessHeap(), 8 /* HEAP_ZERO_MEMORY */, sizeof(SigPlace) * 512);
+    if (!g_sigs) return;
+    char path[400] = {};
+    DWORD pl = GetEnvironmentVariableA("MPFEVER_SIGS", path, 390);
+    if (pl > 0 && pl < 390) {
+        HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+        if (f != INVALID_HANDLE_VALUE) {
+            DWORD size = GetFileSize(f, 0), got = 0;
+            char* buf = (char*)HeapAlloc(GetProcessHeap(), 0, size + 1);
+            if (buf && size < (8u << 20) && ReadFile(f, buf, size, &got, 0)) {
+                for (DWORD i = 0; i < got && g_nSigs < 500; ) {
+                    DWORD j = i;
+                    while (j < got && buf[j] != '\n' && buf[j] != '\r') j++;
+                    if (SigParse(buf + i, (int)(j - i), g_sigs[g_nSigs])) g_nSigs++;
+                    i = j + 1;
+                }
+            }
+            CloseHandle(f);
+            SigNote("signatures from "); SigNote(path); SigNote(": "); SigNoteDec(g_nSigs); SigNote("; ");
+        } else { SigNote("no signature file ("); SigNote(path); SigNote("); "); }
+    } else SigNote("no signature file (MPFEVER_SIGS not set); ");
+    for (const char* b : BUILTIN_SIGS) {
+        SigPlace p;
+        int n = 0; while (b[n]) n++;
+        if (g_nSigs < 512 && SigParse(b, n, p) && !SigHave(p.key)) g_sigs[g_nSigs++] = p;
+    }
+}
+
+// every signature in one pass over .text (buckets by their first two bytes)
+static void SigScan()
+{
+    auto dos = (IMAGE_DOS_HEADER_*)g_base;
+    u8* ntp = (u8*)(g_base + dos->e_lfanew);
+    auto fh = (IMAGE_FILE_HEADER_*)(ntp + 4);
+    auto sec = (IMAGE_SECTION_HEADER_*)(ntp + 4 + sizeof(IMAGE_FILE_HEADER_) + fh->SizeOfOptionalHeader);
+    static int head[65536];
+    static int next[512];
+    for (int i = 0; i < 65536; i++) head[i] = -1;
+    int wild2 = -1;     // (second byte a wildcard: bucketed apart, tried at every position of its first byte)
+    for (int i = g_nSigs - 1; i >= 0; i--) {
+        SigPlace& p = g_sigs[i];
+        if (p.any[1]) { next[i] = wild2; wild2 = i; continue; }
+        int h = p.pat[0] | (p.pat[1] << 8);
+        next[i] = head[h]; head[h] = i;
+    }
+    for (int si = 0; si < fh->NumberOfSections; si++) {
+        if (!(sec[si].Name[0] == '.' && sec[si].Name[1] == 't' && sec[si].Name[2] == 'e' && sec[si].Name[3] == 'x')) continue;
+        u8* t = (u8*)(g_base + sec[si].VirtualAddress);
+        u64 size = sec[si].VirtualSize;
+        for (u64 k = 0; k + 1 < size; k++) {
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = pass ? wild2 : head[t[k] | (t[k + 1] << 8)]; i >= 0; i = next[i]) {
+                    SigPlace& p = g_sigs[i];
+                    if (pass && p.pat[0] != t[k]) continue;
+                    if (k + p.n > size) continue;
+                    int j = 1;
+                    while (j < p.n && (p.any[j] || t[k + j] == p.pat[j])) j++;
+                    if (j == p.n) { if (!p.hits) p.rva = (u32)(sec[si].VirtualAddress + k + p.off); p.hits++; }
+                }
+            }
+        }
+    }
+}
+
+// the place of the nth signature of a key, 0 when it is missing or not unique
+static u32 SigRva(const char* key, int nth = 0)
+{
+    char k16[16] = {};
+    for (int i = 0; key[i] && i < 15; i++) k16[i] = key[i];
+    for (int i = 0; i < g_nSigs; i++) {
+        if (memcmp(g_sigs[i].key, k16, 16) != 0) continue;
+        if (nth-- > 0) continue;
+        return g_sigs[i].hits == 1 ? g_sigs[i].rva : 0;
+    }
+    return 0;
+}
+
+static void SigCount(const char* key, int* found, int* total)
+{
+    char k16[16] = {};
+    for (int i = 0; key[i] && i < 15; i++) k16[i] = key[i];
+    *found = *total = 0;
+    for (int i = 0; i < g_nSigs; i++) if (memcmp(g_sigs[i].key, k16, 16) == 0) { (*total)++; if (g_sigs[i].hits == 1) (*found)++; }
+}
+
+// The GOG build's places of build 40420's separate-companies layout (found again from 40420's: Replicate and its loop call by the
+// simulation loop, the readings of sites20c.h by their bytes and order (sites_gog.h), the tickCount calls among the getter's callers).
+// The rules of the word's readings stay those of their 40420 reading.
+static int RuleOf(u32 rva);
+static void SelectGogLayout()
+{
+    RVA_REPL = 0x256120; RVA_REPL_LOOP = 0x11ed9f;
+    RVA_LINES = 0x7f4020; RVA_MONEYCHECK = 0xccf850;
+    RVA_ADDENTITY = RVA_REMOVEENTITY = 0;     // (diagnostics: not looked for)
+    static const u32 player[5] = { 0x24ed518, 0x24d7241, 0x67b965, 0x86729c, 0x24e4866 };
+    for (int i = 0; i < 5; i++) g_playerRva[i] = player[i];
+    static const u32 sim[] = { 0x8fea60, 0x90d6b0, 0x9696a3, 0xa37a4a, 0xa7c7dd, 0xac1cb3, 0x2694fd5 };
+    g_nSimCalls = 0;
+    for (u32 c : sim) g_simCalls[g_nSimCalls++] = c;
+    int n = 0;
+    for (int i = 0; i < NSITES && n < 96; i++) {
+        g_s20dyn[n] = SITES20C[i];
+        g_s20dyn[n].rva = SITES20C_GOG[i];
+        g_rule20dyn[n] = (u8)RuleOf(SITES20C[i].rva);
+        n++;
+    }
+    g_s20 = g_s20dyn; g_n20 = n; g_s20FromSigs = true;
+    g_layout = true;
+}
+
+static bool ResolveBySignatures();
 static bool SelectBuild(u32 stamp)
 {
+    static int done = 0;     // (called from DllMain and again from Init: resolved once)
+    static bool result = false;
+    if (done) return result;
+    done = 1;
+    bool sigTest = GetEnvironmentVariableA("MPFEVER_SIGTEST", 0, 0) > 0;
     for (const BuildAddrs& b : BUILDS) {
-        if (b.stamp != stamp) continue;
+        if (b.stamp != stamp || sigTest) continue;
+        g_layout = (stamp == 0x6ac50427);     // build 40420
         RVA_ADD = b.add; RVA_CMD_MOVE = b.move; RVA_CMD_DTOR = b.dtor; RVA_HANDLE_DTOR = b.handleDtor; RVA_APPLY = b.apply;
         RVA_SWAP = b.swap; RVA_SYNC = b.sync; RVA_PREITER = b.preIter; RVA_LOOP_RET = b.loopRet;
-        RVA_REPL = b.repl;
-        RVA_REPL_LOOP = b.replLoop;      // return address of the simulation loop's call
-        RVA_MONEYCHECK = b.moneyCheck; RVA_LINES = b.lines; RVA_LUA_MAKESEED = b.makeSeed;
-        g_wordRvas = b.words;
+        RVA_REPL = (stamp == 0x6ac50427) ? 0x255e60 : 0;      // build 40420 only
+        RVA_REPL_LOOP = (stamp == 0x6ac50427) ? 0x11ea9f : 0;      // return address of the simulation loop's call
         UI_ADD_SITES = b.sites; UI_ADD_N = b.nSites;
         g_knownLua = b.lua; g_knownPool = b.pool;
+        if (stamp == 0x6ab3eec7) SelectGogLayout();
+        result = true;
         return true;
     }
-    return false;
+    result = ResolveBySignatures();
+    return result;
+}
+
+// A build this module does not know: every place from its signature (see "targets by signature"). The deferral of native
+// builds needs all of its places; without them the hooks stay off as before. The separate companies' places (build 40420's
+// layout) are used only when the core and the game-state copy are all found.
+static bool ResolveBySignatures()
+{
+    g_bySig = true;
+    LoadSigs();
+    if (!g_sigs) return false;
+    SigScan();
+    const char* core[] = { "add", "move", "dtor", "handleDtor", "apply", "loopRet", "preIter" };
+    bool ok = true;
+    SigNote("missing:");
+    for (const char* k : core) if (!SigRva(k)) { ok = false; SigNote(" "); SigNote(k); }
+    int f, t, tUi;
+    SigCount("uisite", &f, &tUi);
+    int nUi = 0;
+    for (int i = 0; i < tUi && nUi < 32; i++) { u32 r = SigRva("uisite", i); if (r) g_uiDyn[nUi++] = r; }
+    if (!nUi) { ok = false; SigNote(" uisite"); }
+    if (ok) {
+        RVA_ADD = SigRva("add"); RVA_CMD_MOVE = SigRva("move"); RVA_CMD_DTOR = SigRva("dtor"); RVA_HANDLE_DTOR = SigRva("handleDtor");
+        RVA_APPLY = SigRva("apply"); RVA_LOOP_RET = SigRva("loopRet"); RVA_PREITER = SigRva("preIter");
+        RVA_SWAP = SigRva("swap"); RVA_SYNC = SigRva("sync");
+        UI_ADD_SITES = g_uiDyn; UI_ADD_N = nUi;
+    }
+    g_knownLua = SigRva("lua");
+    g_knownPool = SigRva("scriptpool");
+    RVA_LUA_MAKESEED_SIG = SigRva("makeseed");
+    // separate companies (build 40420's layout)
+    RVA_REPL = SigRva("repl"); RVA_REPL_LOOP = SigRva("replLoop");
+    g_layout = ok && RVA_REPL && RVA_REPL_LOOP;
+    if (!RVA_REPL || !RVA_REPL_LOOP) SigNote(" repl");
+    RVA_LINES = SigRva("lines"); RVA_MONEYCHECK = SigRva("moneycheck");
+    RVA_ADDENTITY = SigRva("addEntity"); RVA_REMOVEENTITY = SigRva("removeEntity");
+    const char* pk[5] = { "playerA", "playerB", "playerC", "playerD", "playerE" };
+    for (int i = 0; i < 5; i++) { g_playerRva[i] = SigRva(pk[i]); if (!g_playerRva[i]) { SigNote(" "); SigNote(pk[i]); } }
+    SigCount("simcall", &f, &t);
+    g_nSimCalls = 0;
+    for (int i = 0; i < t && g_nSimCalls < 16; i++) { u32 r = SigRva("simcall", i); if (r) g_simCalls[g_nSimCalls++] = r; }
+    // the readings of the local-player word: each with the bytes found there (they are part of its signature)
+    int n20 = 0, all20 = 0;
+    for (int i = 0; i < g_nSigs && n20 < 96; i++) {
+        SigPlace& p = g_sigs[i];
+        if (memcmp(p.key, "site20c", 8) != 0) continue;
+        all20++;
+        if (p.hits != 1 || p.len < 6 || p.len > 8) continue;
+        // (the place must be a "mov r32,[r64+20Ch]" (8B) or "movsxd r64,[r64+20Ch]" (63): a modrm with a 32-bit displacement
+        // (and the SIB byte 24 for rsp and r12), then 0C 02 00 00)
+        const u8* q = (const u8*)(g_base + p.rva);
+        bool plain = (q[p.len - 6] == 0x8B || q[p.len - 6] == 0x63) && (q[p.len - 5] & 0xC0) == 0x80 && (q[p.len - 5] & 7) != 4;
+        bool sib = p.len >= 7 && (q[p.len - 7] == 0x8B || q[p.len - 7] == 0x63) && (q[p.len - 6] & 0xC7) == 0x84 && q[p.len - 5] == 0x24;
+        if (!(plain || sib) || q[p.len - 4] != 0x0C || q[p.len - 3] != 0x02 || q[p.len - 2] || q[p.len - 1]) continue;
+        Site20c& s = g_s20dyn[n20];
+        s.rva = p.rva; s.len = (u8)p.len; s.dst = (u8)p.dst; s.base = (u8)p.base;
+        memcpy(s.bytes, (u8*)(g_base + p.rva), p.len);
+        g_rule20dyn[n20] = (u8)p.rule;
+        n20++;
+    }
+    g_s20 = g_s20dyn; g_n20 = n20; g_s20FromSigs = true;
+    SigNote(ok ? "; core found" : "; core NOT found");
+    SigNote(", interface tools "); SigNoteDec(nUi); SigNote("/"); SigNoteDec(tUi);
+    SigNote(", player word readings "); SigNoteDec(n20); SigNote("/"); SigNoteDec(all20);
+    SigNote(", seed calls "); SigNoteDec(g_nSimCalls);
+    SigNote(g_layout ? ", separate companies' places found" : ", separate companies' places NOT found");
+    return ok;
 }
 
 // Finds a code pattern in the game's .text (the whole section); returns its address if it occurs exactly once.
@@ -1949,6 +2277,7 @@ static u8* EmitImm64(u8* p, u64 v) { *(u64*)p = v; return p + 8; }
 
 static bool PatchPlayerRead(u32 siteRva, const u8* expect, int expectLen, int siteLen, u8* stub, int stubLen)
 {
+    if (!siteRva) { Buf b; b.str("player read: not found by its signature, left alone"); LogLine(b); return false; }
     u8* site = (u8*)(g_base + siteRva);
     if (memcmp(site, expect, expectLen) != 0) { Buf b; b.str("player read at ").hex(siteRva).str(": unexpected code, left alone"); LogLine(b); return false; }
     DWORD old;
@@ -2013,14 +2342,14 @@ static u8* EmitBack(u8* p, u8* back)
 
 static void PatchPlayerReads()
 {
-    if (RVA_REPL != 0x255e60) return;       // build 40420 only (the sites were found there; unused: see HookWordReads)
+    if (!g_layout) return;                  // build 40420's layout (the sites were found there)
     u8* page = (u8*)VirtualAlloc(0, 4096, 0x3000 /* MEM_COMMIT|MEM_RESERVE */, 0x40 /* PAGE_EXECUTE_READWRITE */);
     if (!page) return;
     int done = 0;
     static const u8 TO_EDX[] = { 0x44, 0x89, 0xDA }, TO_EAX[] = { 0x44, 0x89, 0xD8 }, TO_EBX[] = { 0x44, 0x89, 0xDB }, TO_R8D[] = { 0x45, 0x89, 0xD8 };
     // A: api.engine.util.getPlayer: movsxd rdx,[rax+20Ch] / mov rcx,rbx / call lua_pushinteger, then back at +15
     {
-        const u32 rva = 0x24f0a18;
+        const u32 rva = g_playerRva[0];
         static const u8 expect[] = { 0x48, 0x63, 0x90, 0x0C, 0x02, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8 };
         u8* site = (u8*)(g_base + rva);
         u64 push = (u64)(site + 15 + *(i32*)(site + 11));
@@ -2036,7 +2365,7 @@ static void PatchPlayerReads()
     }
     // B: the other binding: mov eax,[rax+20Ch] / mov [rsp+20h],eax / mov r9,[rdx+180h], then back at +17
     {
-        const u32 rva = 0x24da741;
+        const u32 rva = g_playerRva[1];
         static const u8 expect[] = { 0x8B, 0x80, 0x0C, 0x02, 0x00, 0x00, 0x89, 0x44, 0x24, 0x20, 0x4C, 0x8B, 0x8A, 0x80, 0x01, 0x00, 0x00 };
         u8* site = (u8*)(g_base + rva);
         u8* stub = page + 256;
@@ -2051,7 +2380,7 @@ static void PatchPlayerReads()
     // C: a job of the engine's worker threads (function 0x67b790) that takes the local player along with its data:
     // mov eax,[rax+20Ch] / mov [rbp-48h],r14 / mov [rbp-40h],rbx / mov [rbp-38h],eax, then back at +17
     {
-        const u32 rva = 0x67b955;
+        const u32 rva = g_playerRva[2];
         static const u8 expect[] = { 0x8B, 0x80, 0x0C, 0x02, 0x00, 0x00, 0x4C, 0x89, 0x75, 0xB8, 0x48, 0x89, 0x5D, 0xC0, 0x89, 0x45, 0xC8 };
         u8* site = (u8*)(g_base + rva);
         u8* stub = page + 512;
@@ -2066,7 +2395,7 @@ static void PatchPlayerReads()
     }
     // D: the interface (main thread), function 0x8690be: mov ebx,[r13+20Ch] / lea rax,[rip+X], then back at +14
     {
-        const u32 rva = 0x86917c;
+        const u32 rva = g_playerRva[3];
         static const u8 expect[] = { 0x41, 0x8B, 0x9D, 0x0C, 0x02, 0x00, 0x00, 0x48, 0x8D, 0x05 };
         u8* site = (u8*)(g_base + rva);
         u64 target = (u64)(site + 14 + *(i32*)(site + 10));
@@ -2080,7 +2409,7 @@ static void PatchPlayerReads()
     }
     // E: the interface (main thread), function 0x24e7cb0: mov r8d,[rax+20Ch] / mov rdx,rax / lea rcx,[rsp+20h], then back at +15
     {
-        const u32 rva = 0x24e7d66;
+        const u32 rva = g_playerRva[4];
         static const u8 expect[] = { 0x44, 0x8B, 0x80, 0x0C, 0x02, 0x00, 0x00, 0x48, 0x8B, 0xD0, 0x48, 0x8D, 0x4C, 0x24, 0x20 };
         u8* site = (u8*)(g_base + rva);
         u8* stub = page + 1024;
@@ -2169,7 +2498,6 @@ extern "C" u64 MoneyCheckDetour(void* world, void* ctx, u32 player, i64 cost)
     return g_moneyOrig(world, ctx, player, cost);
 }
 
-static const u32 RVA_ADDENTITY = 0x2bb8940, RVA_REMOVEENTITY = 0x2bbc700;     // ecs::Engine::AddEntity / RemoveEntity (build 40420)
 static const u8 P_ADDENTITY[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18 };
 static const u8 P_REMOVEENTITY[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x44, 0x88, 0x44, 0x24, 0x18, 0x55, 0x56, 0x57, 0x41, 0x54 };
 typedef int* (*AddEntityF)(void* engine, int* out);
@@ -2224,19 +2552,260 @@ extern "C" void RemoveEntityDetour(void* engine, int entity, u8 flag)
     g_remEntOrig(engine, entity, flag);
 }
 
+// ---------------------------------------------------------------- order fixes (ported from TPF3-MP, MIT)
+// Ported from Juliansgith's TPF3-MP (github.com/Juliansgith/Transport-Fever-3-Multiplayer-Mod, MIT; docs/HOOKS.md "The order
+// fixes", "The person-order fixes", investigation/TPF3_TRAIN_PRIORITY_2026-09-30.md), whose person-order fixes come from
+// silver2127's TPF2 Multiplayer. Batches the simulation reads in an order that is the engine's history (node lists, removal
+// order), not the world's state, are sorted by entity id right before the engine reads them, so that two games with the
+// same world decide the same way. The sorts change what the simulation decides: every game of a session runs them (the
+// native module is the same everywhere); MPFEVER_NOORDER=1 turns them all off, and must then be set on every game.
+// Each site is found by its bytes (TPF3-MP's signatures for build 40420) and left alone when they differ.
+
+struct SavedRegs { u64 r15, r14, r13, r12, r11, r10, r9, r8, rdi, rsi, rbp, rbx, rdx, rcx, rax, rflags; };
+static inline u64 OrigRsp(const SavedRegs* r) { return (u64)r + sizeof(SavedRegs); }
+typedef void (*SpliceFn)(SavedRegs*);
+static volatile long g_orderSorts[8], g_orderReorders[8], g_orderRefused[8];
+
+static void SortIds(i32* a, u64 n, int which)
+{
+    _InterlockedIncrement(&g_orderSorts[which]);
+    if (n < 2) return;
+    bool sorted = true;
+    for (u64 i = 1; i < n; i++) if (a[i - 1] > a[i]) { sorted = false; break; }
+    if (sorted) return;
+    _InterlockedIncrement(&g_orderReorders[which]);
+    u64 gap = 1;
+    while (gap < n / 3) gap = gap * 3 + 1;
+    for (; gap > 0; gap /= 3)
+        for (u64 i = gap; i < n; i++) { i32 v = a[i]; u64 j = i; while (j >= gap && a[j - gap] > v) { a[j] = a[j - gap]; j -= gap; } a[j] = v; }
+}
+
+// a std::vector<Entity> (begin, end, capacity) at vec: sorted in place when it is one
+static void SortEntityVector(u64 vec, int which)
+{
+    if (!vec || !Readable((void*)vec, 24)) { _InterlockedIncrement(&g_orderRefused[which]); return; }
+    u64 b = *(u64*)vec, e = *(u64*)(vec + 8), c = *(u64*)(vec + 16);
+    if (b == 0 && e == 0) return;
+    if (e < b || c < e || (b & 3) || ((e - b) & 3) || (e - b) > (64u << 20) || !Writable((void*)b, e - b)) { _InterlockedIncrement(&g_orderRefused[which]); return; }
+    SortIds((i32*)b, (e - b) / 4, which);
+}
+
+// 0: each modification's freed ids join the engine's FIFO free-id queue in entity order (the ids new entities get)
+static void FixFreedIds(SavedRegs* r) { if (Readable((void*)r->r12, 8)) SortEntityVector(*(u64*)r->r12, 0); }
+
+// 1: the vehicles that want track, before the engine's seeded shuffle and priority sort decide who reserves first: entries
+// {int node index, float} of [rbp-0x20]..[rbp-0x18], sorted by their vehicle's entity id, read as the engine's own loop does
+static i32 LandKey(u64 records, u64 entry) { return *(i32*)(records + (u64)(i32)(entry & 0xFFFFFFFF) * 20); }
+static void FixLandVehicles(SavedRegs* r)
+{
+    u64 rbp = r->rbp;
+    if (!Readable((void*)(rbp - 0x80), 0x70)) { _InterlockedIncrement(&g_orderRefused[1]); return; }
+    u64 b = *(u64*)(rbp - 0x20), e = *(u64*)(rbp - 0x18), self = *(u64*)(rbp - 0x80);
+    if (b == e) return;
+    if (e < b || ((e - b) & 7) || (e - b) > (8u << 20) || !Writable((void*)b, e - b) || !Readable((void*)(self + 8), 8)) { _InterlockedIncrement(&g_orderRefused[1]); return; }
+    u64 holder = *(u64*)(self + 8);
+    if (!Readable((void*)holder, 16)) { _InterlockedIncrement(&g_orderRefused[1]); return; }
+    u64 rb = *(u64*)holder, re = *(u64*)(holder + 8);
+    u64 n = (e - b) / 8, nrec = re > rb ? (re - rb) / 20 : 0;
+    u64* ent = (u64*)b;
+    for (u64 i = 0; i < n; i++) { i32 idx = *(i32*)(ent + i); if (idx < 0 || (u64)idx >= nrec) { _InterlockedIncrement(&g_orderRefused[1]); return; } }
+    if (!Readable((void*)rb, nrec * 20)) { _InterlockedIncrement(&g_orderRefused[1]); return; }
+    _InterlockedIncrement(&g_orderSorts[1]);
+    bool sorted = true;
+    for (u64 i = 1; i < n; i++) if (LandKey(rb, ent[i - 1]) > LandKey(rb, ent[i])) { sorted = false; break; }
+    if (sorted) return;
+    _InterlockedIncrement(&g_orderReorders[1]);
+    for (u64 i = 1; i < n; i++) { u64 v = ent[i]; i32 kv = LandKey(rb, v); u64 j = i; while (j > 0 && LandKey(rb, ent[j - 1]) > kv) { ent[j] = ent[j - 1]; j--; } ent[j] = v; }
+}
+// 2: the PersonCapacity candidates (a vector at [rsp+0x70], in rbx) before their capacities are summed for one draw
+static void FixCandidates(SavedRegs* r) { if (r->rbx == OrigRsp(r) + 0x70) SortEntityVector(r->rbx, 2); else _InterlockedIncrement(&g_orderRefused[2]); }
+// 3: the persons and cargo leaving buildings (two vectors at [rbp+7], [rbp+0x1f]) before they are signalled
+static void FixDepartures(SavedRegs* r) { SortEntityVector(r->rbp + 7, 3); SortEntityVector(r->rbp + 0x1f, 3); }
+// 4: the persons arriving on foot ([rbp-0x78]) before their stay draws
+static void FixArrivals(SavedRegs* r) { SortEntityVector(r->rbp - 0x78, 4); }
+// 5: the vehicles at a line stop (the vector the getter returned, in rax) before the boarding loop
+static void FixVehiclesAtStop(SavedRegs* r) { SortEntityVector(r->rax, 5); }
+
+// A mid-function splice: steal whole instructions at the site (no branch, call or rip-relative operand, nothing jumping
+// inside them), jump to a stub that saves every register and xmm0-5, calls fn with the saved registers, restores them,
+// runs the stolen bytes and jumps back.
+static bool Splice(u8*& mem, u32 rva, int steal, SpliceFn fn)
+{
+    u8* site = (u8*)(g_base + rva);
+    Asm a{ mem };
+    a.b(0x9C);                                                     // pushfq
+    { const u8 t_[] = { 0x50, 0x51, 0x52, 0x53, 0x55, 0x56, 0x57, 0x41, 0x50, 0x41, 0x51, 0x41, 0x52, 0x41, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 }; a.bn(t_, (int)sizeof(t_)); }
+    // mov rcx,rsp; mov rbx,rsp; and rsp,-16; sub rsp,0x80
+    { const u8 t_[] = { 0x48, 0x89, 0xE1, 0x48, 0x89, 0xE3, 0x48, 0x83, 0xE4, 0xF0, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00 }; a.bn(t_, (int)sizeof(t_)); }
+    for (int x = 0; x < 6; x++) { const u8 t_[] = { 0xF3, 0x0F, 0x7F, (u8)(0x44 | (x << 3)), 0x24, (u8)(0x20 + 16 * x) }; a.bn(t_, 6); }      // movdqu [rsp+..],xmmN
+    a.b(0x48); a.b(0xB8); a.imm64((u64)fn);                        // mov rax,fn
+    a.b(0xFF); a.b(0xD0);                                          // call rax
+    for (int x = 0; x < 6; x++) { const u8 t_[] = { 0xF3, 0x0F, 0x6F, (u8)(0x44 | (x << 3)), 0x24, (u8)(0x20 + 16 * x) }; a.bn(t_, 6); }      // movdqu xmmN,[rsp+..]
+    // mov rsp,rbx; pop r15..r8, rdi, rsi, rbp, rbx, rdx, rcx, rax; popfq
+    { const u8 t_[] = { 0x48, 0x89, 0xDC, 0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58, 0x5F, 0x5E, 0x5D, 0x5B, 0x5A, 0x59, 0x58, 0x9D }; a.bn(t_, (int)sizeof(t_)); }
+    a.bn(site, steal);                                             // the stolen instructions
+    a.b(0xFF); a.b(0x25); a.b(0); a.b(0); a.b(0); a.b(0); a.imm64((u64)(site + steal));   // jmp back
+    u8* stub = mem;
+    mem = (u8*)(((u64)a.p + 15) & ~15ull);
+    DWORD old;
+    if (!VirtualProtect(site, steal, PAGE_EXECUTE_READWRITE, &old)) return false;
+    u8 patch[16];
+    patch[0] = 0xE9; *(i32*)(patch + 1) = (i32)(stub - (site + 5));
+    for (int k = 5; k < steal; k++) patch[k] = 0x90;
+    memcpy(site, patch, steal);
+    VirtualProtect(site, steal, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, steal);
+    return true;
+}
+
+struct OrderFix { const char* name; const char* sig; int offset; int steal; SpliceFn fn; };
+static const OrderFix ORDER_FIXES[] = {
+    { "freed ids", "49 8D 8D D8 00 00 00 4D 8B 0C 24 49 8B 41 08 48 89 44 24 20 4D 8B 09 4D 8B 85 F8 00 00 00 48 8D 55 87 E8", 0, 7, FixFreedIds },
+    { "land vehicles", "45 0F 44 C4 41 BE 40 00 00 00 49 C7 C3 FF FF FF FF 0F 1F 80 00 00 00 00 4D 8D 76 FF 49 D1 EB 49 81 FB FD FF FF 7F 77 F0 4C 8B 6D E0 48 8B 75 E8 4C 3B EE", 40, 8, FixLandVehicles },
+    { "destination candidates", "C7 44 24 60 01 00 00 00 E8 ?? ?? ?? ?? 4C 8B D0 48 8B 54 24 78 48 8B 4C 24 70 48 2B D1 48 C1 FA 02", 0, 8, FixCandidates },
+    { "departures", "48 8B C8 E8 ?? ?? ?? ?? 48 8B 4D 07 48 3B 4D 0F 74 1A 48 8B 47 30", 8, 8, FixDepartures },
+    { "arrivals", "E8 ?? ?? ?? ?? 48 8B 45 90 48 39 45 88 74 17 49 8B 4F 68 48 85 C9 74 0E", 5, 8, FixArrivals },
+    { "vehicles at stop", "49 8B 4F 28 E8 ?? ?? ?? ?? 48 89 84 24 48 02 00 00 41 8B 7F 50 48 8B 4C 24 58", 9, 8, FixVehiclesAtStop },
+};
+static const int ORDER_N = (int)(sizeof(ORDER_FIXES) / sizeof(ORDER_FIXES[0]));
+
+static void InstallOrderFixes()
+{
+    if (GetEnvironmentVariableA("MPFEVER_NOORDER", 0, 0) > 0) { Buf b; b.str("order fixes: off (MPFEVER_NOORDER)"); LogLine(b); return; }
+    u8* mem = AllocNear(0x2000);
+    if (!mem) { Buf b; b.str("order fixes: no memory near the game's code"); LogLine(b); return; }
+    // the land vehicles' sort reads the records the way the engine's reservation loop does: refused unless that loop is there
+    bool recordsOk = FindSigRva("4C 8B 45 80 49 8B 50 08 49 63 45 00 48 8D 0C 80 48 8B 02 4C 8D 24 88 49 8B 50 18") != 0;
+    Buf b; b.str("order fixes (from TPF3-MP):");
+    for (int i = 0; i < ORDER_N; i++) {
+        const OrderFix& f = ORDER_FIXES[i];
+        u32 at = FindSigRva(f.sig);
+        bool ok = at && !(i == 1 && !recordsOk) && Splice(mem, at + f.offset, f.steal, f.fn);
+        b.str(" ").str(f.name).str(ok ? " on" : " OFF").str(i + 1 < ORDER_N ? "," : "");
+    }
+    LogLine(b);
+    // the simulation's seeds from GameTime.tickCount (the land vehicles' shuffle, a vehicle variant pick, town and street
+    // development...): tickCount also counts the frames a game stands still, a different number on every game of a session;
+    // those calls now read updateCount (the simulation step, the same everywhere). TPF3-MP's "paused-tick" fix does the same by
+    // not counting the paused frames; this keeps tickCount itself as it is (the mod's stillness checks read it). The two calls
+    // from the interface's tools (0x577e0b, 0x5a51f1) are left as they are.
+    u32 getTick = FindSigRva("48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10 E8 ?? ?? ?? ?? 8B 40 3C 48 83 C4 28 C3");
+    u32 getUpd = FindSigRva("48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10 E8 ?? ?? ?? ?? 8B 40 40 48 83 C4 28 C3");
+    int moved = 0;
+    if (getTick && getUpd) {
+        for (int ci = 0; ci < g_nSimCalls; ci++) {
+            u32 c = g_simCalls[ci];
+            if (!c) continue;
+            u8* site = (u8*)(g_base + c);
+            if (site[0] != 0xE8 || (u32)(c + 5 + *(i32*)(site + 1)) != getTick) continue;
+            DWORD old;
+            if (!VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old)) continue;
+            *(i32*)(site + 1) = (i32)(getUpd - (c + 5));
+            VirtualProtect(site, 5, old, &old);
+            FlushInstructionCache(GetCurrentProcess(), site, 5);
+            moved++;
+        }
+    }
+    Buf t; t.str("simulation seeds from the step count instead of tickCount: ").dec(moved).str(" of ").dec(g_nSimCalls).str(" calls"); LogLine(t);
+}
+
+// ---------------------------------------------------------------- the tools' company (ported from TPF3-MP, MIT)
+// Ported from TPF3-MP's "The tools' player" (docs/HOOKS.md, crates/tpf3mp-hook/src/toolplayer.rs, signatures of
+// profiles/tf3_build40420_steam_windows/hooks.toml). UI::CGameUI's constructor reads the save's player once and hands each
+// tool a copy. The builds themselves are given the player's company by OwnerFix, but the tools also use their copy to decide
+// what is "the player's own": the street tool snapped only to the ends of the company's own roads, and the bulldozer would
+// not offer the company's own roads, stops and buildings (its filter's owner list held the save's company: issue #47). At the
+// start of each tool's Step (main thread), a field still holding the savegame company gets this machine's company. Only
+// with separate companies, once this machine's company is known and differs from the savegame's.
+
+static u32 g_bullVtable = 0;           // the bulldozer filter's vtable (rva), checked before its list is written
+static volatile long g_toolWrites = 0;
+
+static void ToolField(u64 obj, u32 off)
+{
+    long canon = g_canon, local = g_localPlayer;
+    if (!canon || !local || canon == local || !Writable((void*)(obj + off), 4)) return;
+    if (*(i32*)(obj + off) == canon) { *(i32*)(obj + off) = (i32)local; _InterlockedIncrement(&g_toolWrites); }
+}
+// a std::vector<Entity> at vec: its savegame-company entries get this machine's company
+static void ToolList(u64 vec)
+{
+    long canon = g_canon, local = g_localPlayer;
+    if (!canon || !local || canon == local || !Readable((void*)vec, 24)) return;
+    u64 b = *(u64*)vec, e = *(u64*)(vec + 8);
+    if (b == e || e < b || ((e - b) & 3) || (e - b) > 4096 || !Writable((void*)b, e - b)) return;
+    for (i32* q = (i32*)b; q < (i32*)e; q++) if (*q == canon) { *q = (i32)local; _InterlockedIncrement(&g_toolWrites); }
+}
+static void ToolStreetBuilder(SavedRegs* r) { ToolField(r->rcx, 0xc0); }
+static void ToolTrackModifier(SavedRegs* r) { ToolField(r->rcx, 0xa0); }
+static void ToolConstructionBuilder(SavedRegs* r) { ToolField(r->rcx, 0xa0); }
+static void ToolStreetTerminalBuilder(SavedRegs* r) { ToolField(r->rcx, 0xa0); }
+static void ToolModuleBuilder(SavedRegs* r) { ToolField(r->rcx, 0xa8); }
+static void ToolBulldozer(SavedRegs* r)
+{
+    u64 self = r->rcx;
+    ToolField(self, 0x28);                 // its own player: the proposals it makes
+    ToolList(self + 0xa8);                 // its owner list: every query it makes
+    if (!Readable((void*)(self + 0xc0), 8)) return;
+    u64 f = *(u64*)(self + 0xc0);          // its BulldozerFilter, when the vtable is the one its constructor puts
+    if (g_bullVtable && f && Readable((void*)f, 0x28) && *(u64*)f == g_base + g_bullVtable) ToolList(f + 0x10);
+}
+
+static void InstallToolCompany()
+{
+    if (GetEnvironmentVariableA("MPFEVER_NOTOOLCO", 0, 0) > 0) { Buf b; b.str("tools' company: off (MPFEVER_NOTOOLCO)"); LogLine(b); return; }
+    u8* mem = AllocNear(0x1000);
+    if (!mem) return;
+    // every field's offset is the one its constructor's code stores (the signatures include the stores)
+    struct Tool { const char* name; const char* step; int steal; const char* store; SpliceFn fn; };
+    static const Tool tools[] = {
+        { "street and track builder", "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 E0 CC FF FF", 5,
+          "48 8B 85 10 01 00 00 48 89 86 B0 00 00 00 48 8B 85 18 01 00 00 48 89 86 B8 00 00 00 8B 85 28 01 00 00 89 86 C0 00 00 00", ToolStreetBuilder },
+        { "track modifiers", "48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 CC FF FF", 5,
+          "48 8B 85 20 03 00 00 49 89 86 98 00 00 00 8B 85 30 03 00 00 41 89 86 A0 00 00 00", ToolTrackModifier },
+        { "construction builder", "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 C0 D5 FF FF", 5,
+          "49 89 B6 90 00 00 00 48 8B 85 E0 02 00 00 49 89 86 98 00 00 00 8B 85 F0 02 00 00 41 89 86 A0 00 00 00", ToolConstructionBuilder },
+        { "stop, signal and waypoint builder", "40 53 56 57 41 54 41 55 41 56 41 57 B8 80 14 00 00", 6,
+          "49 89 BE 88 00 00 00 49 89 B6 90 00 00 00 48 8B 85 C0 01 00 00 49 89 86 98 00 00 00 8B 85 D0 01 00 00 41 89 86 A0 00 00 00", ToolStreetTerminalBuilder },
+        { "module builder", "40 53 56 57 41 54 41 55 41 56 41 57 B8 A0 10 00 00", 6,
+          "48 8B 85 C8 02 00 00 48 89 87 98 00 00 00 49 8B 04 24 33 C9 49 89 0C 24 48 89 87 A0 00 00 00 8B 85 E0 02 00 00 89 87 A8 00 00 00", ToolModuleBuilder },
+        { "bulldozer", "48 8B C4 48 89 58 20 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 28 F1 FF FF", 7,
+          "48 8D 05 ?? ?? ?? ?? 49 89 06 49 89 76 20 41 89 5E 28 48 8B 85 C8 01 00 00", ToolBulldozer },
+    };
+    u32 filter = FindSigRva("48 8D 05 ?? ?? ?? ?? 48 89 03 48 89 73 08 48 89 7B 10 48 89 7B 18 48 89 7B 20 66 C7 43 28 00 00 EB 03 48 8B DF 48 89 5D D8 49 89 9E C0 00 00 00");
+    bool ownerList = FindSigRva("49 89 BE 98 00 00 00 49 89 BE A0 00 00 00 4D 8D BE A8 00 00 00 49 89 3F 49 89 7F 08 49 89 7F 10") != 0;
+    if (filter) g_bullVtable = (u32)(filter + 7 + *(i32*)(g_base + filter + 3));
+    Buf b; b.str("tools' company (from TPF3-MP):");
+    for (int i = 0; i < (int)(sizeof(tools) / sizeof(tools[0])); i++) {
+        const Tool& t = tools[i];
+        u32 step = FindSigRva(t.step);
+        bool ok = step && FindSigRva(t.store) && !(i == 5 && (!filter || !ownerList)) && Splice(mem, step, t.steal, t.fn);
+        b.str(" ").str(t.name).str(ok ? " on" : " OFF").str(i + 1 < (int)(sizeof(tools) / sizeof(tools[0])) ? "," : "");
+    }
+    LogLine(b);
+}
+
+// the order fixes' counters, at most once a minute in native.log: sorts made, of them reordered, refused
+static void LogOrderCounts()
+{
+    Buf b; b.str("order fixes:");
+    for (int i = 0; i < ORDER_N; i++) b.str(" ").str(ORDER_FIXES[i].name).str(" ").dec(g_orderSorts[i]).str("/").dec(g_orderReorders[i]).str("/").dec(g_orderRefused[i]);
+    b.str("; tools' company written ").dec(g_toolWrites).str(" time(s)");
+    LogLine(b);
+}
+
 static void HookWordReads()
 {
-    if (!RVA_REPL) return;
+    if (!g_layout) return;
     u8* mem = AllocNear(0x10000);
     if (!mem) { Buf e; e.str("player word: no memory near the game's code, readings not hooked"); LogLine(e); return; }
     u8* stubs = mem;
     int done = 0;
-    for (int i = 0; i < NSITES && i < 64; i++) {
-        const Site20c& s = SITES20C[i];          // (its rva names the reading: 40420's; RuleOf is keyed by it)
-        u32 rva = g_wordRvas ? g_wordRvas[i] : s.rva;
-        u8* site = (u8*)(g_base + rva);
+    for (int i = 0; i < g_n20 && i < 64; i++) {
+        const Site20c& s = g_s20[i];
+        u8* site = (u8*)(g_base + s.rva);
         if (memcmp(site, s.bytes, s.len) != 0) continue;
-        g_siteRule[i] = (u8)RuleOf(s.rva);
+        g_siteRule[i] = g_s20FromSigs ? g_rule20dyn[i] : (u8)RuleOf(s.rva);
         Asm a{ stubs };
         a.b(0x9C);                                   // pushfq
         { const u8 t_[] = { 0x41, 0x52, 0x41, 0x53 }; a.bn(t_, (int)sizeof(t_)); }            // push r10 / push r11
@@ -2332,7 +2901,87 @@ static void HookWordReads()
         done++;
     }
     FlushInstructionCache(GetCurrentProcess(), mem, 0x10000);
-    Buf b; b.str("player word: ").dec(done).str(" of ").dec(NSITES).str(" readings hooked"); LogLine(b);
+    Buf b; b.str("player word: ").dec(done).str(" of ").dec(g_n20).str(" readings hooked").str(g_bySig ? " (found by their signatures)" : ""); LogLine(b);
+}
+
+// ---------------------------------------------------------------- smooth pacing: the batch interval (ported from TPF3-MP, MIT)
+// The main thread's CGame::Step calls CGame::Sync every guiFrameTime microseconds (m_data = [CGame+0x1f0], guiFrameTime the
+// i32 at m_data+0x218, set by Sync from the engine's own estimate, 200-400 ms): each call hands the simulation thread its next
+// batch (one update at 1x, four at 4x) and the renderer interpolates across the batch. Lockstep with a barrier used to make
+// a game that came up to the slowest player's clock stand still until that clock moved, then run at full speed again: vehicles
+// moved, stopped, moved (issue #47, a dedicated server on the same PC). The mod (G.smoothPace in the bridge) now writes a factor
+// in native_pace.txt ("<permille> <sequence>"): right after each Sync that returned true, guiFrameTime is scaled by it, so a
+// game close to the barrier shows its batches a little longer (runs a little slower) and one behind a little shorter, and
+// nobody needs to stop. Only real time between batches changes: every game still runs the same steps (TPF3-MP's "The batch
+// interval", docs/HOOKS.md; signature of the call from its profile of build 40420). Writing guiFrameTime anywhere but right
+// after a true Sync moved TPF2's render clock back; the layout is checked before every write and any surprise turns it off.
+// A factor not refreshed for 5 s goes back to 1 (a mod that stopped). MPFEVER_SMOOTH=0 (in the bridge) leaves it at 1.
+typedef u64 (*SyncCallF)(void*, void*);
+static void* g_syncTarget = 0;
+static long g_trimSeq = -1;
+static DWORD g_trimSeqAt = 0, g_paceReadAt = 0;
+static void ReadPace()
+{
+    char path[400];
+    PathOf(path, "native_pace.txt");
+    HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    DWORD now = GetTickCount();
+    if (f != INVALID_HANDLE_VALUE) {
+        char buf[64] = {};
+        DWORD got = 0;
+        ReadFile(f, buf, 63, &got, 0);
+        CloseHandle(f);
+        long v = 0, seq = 0; DWORD i = 0;
+        while (i < got && buf[i] >= '0' && buf[i] <= '9') v = v * 10 + (buf[i++] - '0');
+        while (i < got && buf[i] == ' ') i++;
+        while (i < got && buf[i] >= '0' && buf[i] <= '9') seq = seq * 10 + (buf[i++] - '0');
+        if (seq != g_trimSeq) { g_trimSeq = seq; g_trimSeqAt = now; }
+        if (v >= 500 && v <= 2500) g_trim = v;
+    }
+    if (g_trim != 1000 && now - g_trimSeqAt > 5000) g_trim = 1000;
+}
+extern "C" u64 SyncCallWrap(void* cgame, void* fn)
+{
+    u64 r = ((SyncCallF)g_syncTarget)(cgame, fn);
+    if (!(r & 0xFF) || g_paceOff) return r;
+    DWORD now = GetTickCount();
+    if (now - g_paceReadAt >= 250) { g_paceReadAt = now; ReadPace(); }
+    long trim = g_trim;
+    if (trim == 1000) return r;
+    u8* cg = (u8*)cgame;
+    if (!cg || !Readable(cg + 0x1f0, 8)) { g_paceOff = 1; return r; }
+    u8* m = *(u8**)(cg + 0x1f0);
+    if (!m || ((uptr)m & 7) || !Readable(m + 0x1a0, 16) || !Writable(m + 0x218, 4)) { g_paceOff = 1; return r; }
+    i64 total = *(i64*)(m + 0x1a0), last = *(i64*)(m + 0x1a8);
+    i32 v = *(i32*)(m + 0x218);
+    if (total < last || v < 20000 || v > 2000000) return r;     // (not the layout expected: left alone this time)
+    i64 nv = (i64)v * trim / 1000;
+    if (nv < 20000) nv = 20000;
+    if (nv > 2000000) nv = 2000000;
+    *(i32*)(m + 0x218) = (i32)nv;
+    _InterlockedIncrement(&g_paceWrites);
+    return r;
+}
+
+static void InstallSmoothPacing()
+{
+    // CGame::Step's call of CGame::Sync: "movsxd rdi,[rdx+218h] / mov rcx,rbx / add rdi,[rdx+1A8h] / mov rdx,rsi / call Sync"
+    u32 at = FindSigRva("48 63 BA 18 02 00 00 48 8B CB 48 03 BA A8 01 00 00 48 8B D6 E8 ?? ?? ?? ?? 84 C0 74");
+    if (!at) { Buf b; b.str("smooth pacing: off (CGame::Step's call of Sync not found)"); LogLine(b); return; }
+    u8* site = (u8*)(g_base + at + 20);
+    u8* target = site + 5 + *(i32*)(site + 1);
+    if (site[0] != 0xE8 || (RVA_SYNC && target != (u8*)(g_base + RVA_SYNC))) { Buf b; b.str("smooth pacing: off (the call at ").hex(at + 20).str(" is not CGame::Sync's)"); LogLine(b); return; }
+    u8* thunk = AllocNear(64);
+    if (!thunk) { Buf b; b.str("smooth pacing: off (no memory near the game's code)"); LogLine(b); return; }
+    g_syncTarget = target;
+    WriteAbsJump(thunk, (uptr)&SyncCallWrap);
+    FlushInstructionCache(GetCurrentProcess(), thunk, 14);
+    DWORD old;
+    if (!VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old)) return;
+    *(i32*)(site + 1) = (i32)(thunk - (site + 5));
+    VirtualProtect(site, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, 5);
+    Buf b; b.str("smooth pacing: CGame::Sync's call at ").hex(at + 20).str(" redirected (batch interval scaled by native_pace.txt)"); LogLine(b);
 }
 
 static DWORD WINAPI Init(void*)
@@ -2369,8 +3018,10 @@ static DWORD WINAPI Init(void*)
     { Buf t; t.str(g_scriptPoolPatched ? "game scripts: own pool, one worker" : "game scripts: pool NOT patched"); LogLine(t); }
     if (g_simPoolA || g_simPoolB) { Buf t; t.str("pool sizes forced: ").hex(g_simPoolA).str(",").hex(g_simPoolB); LogLine(t); }
     if (g_threads) { Buf t; t.str("engine told it has ").hex(g_threads).str(" processor(s)").str(g_realGetSystemInfo ? "" : " (GetSystemInfo not patched)"); LogLine(t); }
-    if (!SelectBuild(fh->TimeDateStamp)) {
-        Buf w; w.str("unknown game build: hooks off"); LogLine(w);
+    bool known = SelectBuild(fh->TimeDateStamp);
+    if (g_sigReportN) { g_sigReport[g_sigReportN] = 0; Buf w; w.str("game build ").hex(fh->TimeDateStamp).str(": ").str(g_sigReport); LogLine(w); }
+    if (!known) {
+        Buf w; w.str(g_bySig ? "unknown game build, its places not all found by their signatures: hooks off" : "unknown game build: hooks off"); LogLine(w);
         return 0;
     }
     InstallDetour(RVA_ADD, P_ADD, sizeof(P_ADD), (void*)&AddDetour, (void**)&g_addOrig);
@@ -2385,11 +3036,15 @@ static DWORD WINAPI Init(void*)
         if (InstallDetour(RVA_PREITER, P_PREITER, sizeof(P_PREITER), (void*)&PreIterDetour, (void**)&g_preIterOrig)) g_preIterOn = true;
         if (RVA_REPL) InstallDetour(RVA_REPL, P_REPL, sizeof(P_REPL), (void*)&ReplDetour, (void**)&g_replOrig);
     }
+    InstallSmoothPacing();
     HookWordReads();
+    // (found by their own signatures, on any build where those match exactly once)
+    InstallOrderFixes();
+    if (g_layout) InstallToolCompany();
     { Buf b; b.str(g_luaSeedFixed ? "Lua string hash seed: fixed (same table order on every game)" : "Lua string hash seed: NOT fixed"); LogLine(b); }
-    if (RVA_MONEYCHECK) InstallDetour(RVA_MONEYCHECK, P_MONEYCHECK, sizeof(P_MONEYCHECK), (void*)&MoneyCheckDetour, (void**)&g_moneyOrig);
-    if (RVA_LINES) InstallDetour(RVA_LINES, P_LINES, sizeof(P_LINES), (void*)&LinesDetour, (void**)&g_linesOrig);
-    if (RVA_REPL == 0x255e60 && GetEnvironmentVariableA("MPFEVER_ENTWATCH", 0, 0) > 0) {
+    if (g_layout && RVA_MONEYCHECK) InstallDetour(RVA_MONEYCHECK, P_MONEYCHECK, sizeof(P_MONEYCHECK), (void*)&MoneyCheckDetour, (void**)&g_moneyOrig);
+    if (g_layout && RVA_LINES) InstallDetour(RVA_LINES, P_LINES, sizeof(P_LINES), (void*)&LinesDetour, (void**)&g_linesOrig);
+    if (g_layout && RVA_ADDENTITY && RVA_REMOVEENTITY && GetEnvironmentVariableA("MPFEVER_ENTWATCH", 0, 0) > 0) {
         InstallDetour(RVA_ADDENTITY, P_ADDENTITY, sizeof(P_ADDENTITY), (void*)&AddEntityDetour, (void**)&g_addEntOrig);
         InstallDetour(RVA_REMOVEENTITY, P_REMOVEENTITY, sizeof(P_REMOVEENTITY), (void*)&RemoveEntityDetour, (void**)&g_remEntOrig);
         g_entWatch = true;
@@ -2530,7 +3185,9 @@ static void PatchScriptPool(uptr base)
                                  0xC7, 0x44, 0x24, 0x20, 0x01, 0x00, 0x00, 0x00,           // mov [rsp+20h],1
                                  0xE8 };                                                   // call hardware_concurrency
     u8* p = FindUnique(base, expect, (int)sizeof(expect), g_knownPool);
-    if (!p) return;
+    // (another build: the jump's distance may differ)
+    if (!p) { u32 r = g_knownPool ? g_knownPool : FindSigRva("83 F8 08 0F 8D ?? ?? ?? ?? C7 44 24 20 01 00 00 00 E8"); if (r) p = (u8*)(base + r); }
+    if (!p || p[0] != 0x83 || p[1] != 0xF8 || p[2] != 0x08 || p[3] != 0x0F || p[4] != 0x8D || p[17] != 0xE8) return;
     DWORD prot;
     VirtualProtect(p, 32, PAGE_EXECUTE_READWRITE, &prot);
     for (int k = 3; k < 9; k++) p[k] = 0x90;                    // never the shared pool
@@ -2606,17 +3263,21 @@ extern "C" int LuaLoadDetour(void* L, LuaReader reader, void* data, const char* 
 // Lua state: the order in which pairs() walks a table with string keys then differs from one game to the other, and so
 // does every decision a game script or a construction script takes in such a loop (towns, industries, the lanes of a
 // new industry were numbered differently on two games). makeseed is made to return one constant (MPFEVER_LUASEED=0: not).
-// (RVA_LUA_MAKESEED: per build, see BUILDS; only caller lua_newstate (g->seed = makeseed(L)). Bytes 9..12 of the pattern are a
-// RIP-relative offset, different in every build: not compared)
+static const u32 RVA_LUA_MAKESEED = 0x2fc8fe0;     // build 40420, only caller lua_newstate (g->seed = makeseed(L))
 static const u8 P_LUA_MAKESEED[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B, 0x05, 0x4B, 0x4A, 0xD2, 0x00, 0x48, 0x33, 0xC4,
                                      0x48, 0x89, 0x44, 0x24, 0x48, 0x48, 0x8B, 0xD9, 0x33, 0xC9 };
 static void PatchLuaSeed(uptr base)
 {
     char v[4] = {};
     if (GetEnvironmentVariableA("MPFEVER_LUASEED", v, 3) > 0 && v[0] == '0') return;
-    if (!RVA_LUA_MAKESEED) return;
     u8* f = (u8*)(base + RVA_LUA_MAKESEED);
-    if (memcmp(f, P_LUA_MAKESEED, 9) != 0 || memcmp(f + 13, P_LUA_MAKESEED + 13, sizeof(P_LUA_MAKESEED) - 13) != 0) return;
+    if (memcmp(f, P_LUA_MAKESEED, sizeof(P_LUA_MAKESEED)) != 0) {
+        // another build: found by its signature (the same code, but for the distance to the security cookie at +9)
+        u32 r = RVA_LUA_MAKESEED_SIG ? RVA_LUA_MAKESEED_SIG : FindSigRva("40 53 48 83 EC 50 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 48 48 8B D9 33 C9");
+        if (!r) return;
+        f = (u8*)(base + r);
+        for (int i = 0; i < (int)sizeof(P_LUA_MAKESEED); i++) if ((i < 9 || i > 12) && f[i] != P_LUA_MAKESEED[i]) return;
+    }
     const u8 code[] = { 0xB8, 0x56, 0x46, 0x50, 0x4D, 0xC3 };    // mov eax, 'MPFV' ; ret
     DWORD prot;
     if (!VirtualProtect(f, sizeof(code), PAGE_EXECUTE_READWRITE, &prot)) return;

@@ -1,12 +1,12 @@
 MPFever - Multiplayer for Transport Fever 3
-Version 0.3.12-experimental
+Version 0.3.22
 ===========================================
 
 MPFever lets several players play the same Transport Fever 3 world together, each one
 in their own copy of the game, over the internet or a local network: either all in the SAME
 company, or each player with their OWN company.
 
-THIS IS AN EXPERIMENTAL VERSION. Expect bugs, pauses and the occasional crash. Keep
+MPFever IS STILL IN ACTIVE DEVELOPMENT. You may meet bugs, pauses or a crash now and then. Keep
 backups of the savegames you play with, and please send feedback (see "Reporting a
 problem" below).
 
@@ -43,8 +43,13 @@ WHAT WORKS
   "MULTIJOUEUR / MPFever" button in the main menu opens the multiplayer window.
   - Host: pick one of your savegames (any of them, even one made without MPFever: the mod
     adds no content to the game, it only synchronises) and open the lobby. If the game uses
-    other mods that add content (vehicles, buildings...), every player must have the same
-    ones installed.
+    other mods, every player must have the same ones installed: the lobby lists them and
+    shows each player those missing on their PC.
+  - Mods: MPFever is not made for other mods yet. Mods that only add content (vehicles,
+    buildings...) usually work. Mods that change the game by themselves (rename lines,
+    assign terminals, change colours...) do it on each game separately and break the
+    synchronisation: play without them. Mod authors who want their mod to work with
+    MPFever are welcome to get in touch (GitHub issues).
   - Lobby: the players join it in the main menu and see who is there. The host starts the
     game when everybody is there: every game loads the host's savegame at the same time.
   - Join: type the host's IP address. The host's game is received and loaded
@@ -109,8 +114,12 @@ KNOWN LIMITATIONS
 - Windows only. Made for Transport Fever 3 on Steam (builds 40408 and 40420) and GOG.
   After a game update, the mod still runs but synchronisation may be worse until
   MPFever is updated.
-- Without port forwarding on the host's box, players need a virtual LAN (Radmin VPN,
-  ZeroTier, Tailscale) or Steam invitations will not reach the host.
+- The host's port is opened on its router by itself (UPnP, else NAT-PMP) while a session
+  runs, and closed again afterwards: the launcher's log says whether it worked. When the
+  router has no public address of its own (CGNAT: the log says so), nobody outside can
+  reach the host over IPv4: use IPv6, a dedicated server elsewhere, or a virtual LAN
+  (Radmin VPN, ZeroTier, Tailscale, Porthole). Write  upnp=0  in mpfever_settings.txt to
+  leave the router alone.
 - IPv6: the host also accepts players over IPv6, and Steam invitations carry its IPv6
   address as well. A host behind DS-Lite (no public IPv4 address of its own, as on many
   cable connections) is reached that way when the joining player has IPv6 too and the
@@ -135,10 +144,21 @@ MPFever works with the Steam and the GOG versions of the game. It finds the game
 otherwise choose TransportFever3.exe with « Game folder: Browse… ». With the GOG version,
 Steam invitations are not available: players join with the host's address.
 MPFever connects to the address you type (or the one of the Steam invitation you accept).
-The only other connection: when you host, it asks api.ipify.org (a public service that
-answers with your public IP address, nothing else is sent) so that the address given to
-Steam invitations works from the internet. Write  lookupip=0  in mpfever_settings.txt (next to
-MPFever.exe) to disable this; invitations then carry your local address.
+The only other connections:
+- At startup, before the game starts, and every 30 minutes, it asks GitHub
+  (api.github.com) for the newest MPFever release. A newer one is installed by itself:
+  at startup at once (downloaded from github.com/dkdknight/MPFever/releases, checked,
+  MPFever's files replaced, your mpfever_settings.txt and logs kept, MPFever started
+  again); found later, when you close the game; a dedicated server installs it and
+  restarts once nobody is connected. Every player needs the same version, so everybody
+  gets it this way. Write  autoupdate=ask  in mpfever_settings.txt (next to MPFever.exe)
+  to be asked first, or  autoupdate=0  to disable the check.
+- When the host's router supports UPnP or NAT-PMP, it asks the router to open the
+  session's port, and to close it again afterwards (upnp=0 to disable).
+- When you host, it asks api.ipify.org (a public service that answers with your public IP
+  address, nothing else is sent) so that the address given to Steam invitations works from
+  the internet. Write  lookupip=0  in mpfever_settings.txt (next to MPFever.exe) to disable
+  this; invitations then carry your local address.
 
 UNINSTALL: delete winhttp.dll and steam_appid.txt from the game folder, delete the
 folder mods\mpfever_1 in your Transport Fever 3 user folder, and delete the MPFever
@@ -147,7 +167,14 @@ folder. The full source code is public (see the mod page).
 
 REPORTING A PROBLEM
 -------------------
-Please describe what you did, what you expected and what happened, and attach:
+The easiest: "Report a problem (logs)" in the MPFever window of the game (pause menu), or
+"Report a problem" in the launcher window. MPFever puts every log into a zip file (folder
+"reports" next to MPFever.exe), shows it in the Explorer and opens a new GitHub issue with
+its text filled in: describe what you did and when, drag the zip into the issue, send.
+After a crash of the game MPFever offers it by itself. The other players can send theirs
+the same way. The game rewrites its own log at every start: MPFever keeps a copy (in the
+session folder when the game closes, and logs\stdout-previous.txt before it starts it).
+By hand, attach:
 1. the newest file from the "logs" folder next to MPFever.exe (launcher-....log);
 2. the folders %TEMP%\mpfever\Host-... or Client-... of that session (zip them);
 3. if the game crashed: the newest files of
@@ -163,3 +190,5 @@ CREDITS
 
 
 See INSTALL.txt to get started and ROADMAP.txt for what comes next.
+
+Enjoying MPFever? Support the project or thank its author on Ko-fi: https://ko-fi.com/knighthd

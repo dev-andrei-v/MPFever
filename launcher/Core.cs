@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -304,9 +304,11 @@ namespace MPFever
             char c = s[i];
             if (c == '{') return Table(s, ref i);
             if (c == '"') return Str(s, ref i);
-            if (s.Substring(i).StartsWith("true")) { i += 4; return true; }
-            if (s.Substring(i).StartsWith("false")) { i += 5; return false; }
-            if (s.Substring(i).StartsWith("nil")) { i += 3; return null; }
+            // (compared in place: a copy of the rest of the text at every value made a station's 850 KB build take 30 s to read,
+            // and the reader of that player's messages, their clock among them, stood still meanwhile: issue #54)
+            if (string.CompareOrdinal(s, i, "true", 0, 4) == 0) { i += 4; return true; }
+            if (string.CompareOrdinal(s, i, "false", 0, 5) == 0) { i += 5; return false; }
+            if (string.CompareOrdinal(s, i, "nil", 0, 3) == 0) { i += 3; return null; }
             int st = i;
             while (i < s.Length && "+-0123456789.eE".IndexOf(s[i]) >= 0) i++;
             double.TryParse(s.Substring(st, i - st), NumberStyles.Float, CultureInfo.InvariantCulture, out var d);
@@ -413,7 +415,9 @@ namespace MPFever
         {
             Name = name;
             Role = role;
-            Dir = Path.Combine(Path.GetTempPath(), "mpfever", name + "-" + DateTime.Now.ToString("HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+            // (the folder's name in ASCII as well: the player's name goes to the game in identity.txt)
+            var folder = new string((name ?? "").Select(c => c < 128 && (char.IsLetterOrDigit(c) || c == '-' || c == '_') ? c : '_').ToArray());
+            Dir = Path.Combine(SessionRoot(), folder + "-" + DateTime.Now.ToString("HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 6));
             Directory.CreateDirectory(Dir);
             inPath = Path.Combine(Dir, "in.log");
             outPath = Path.Combine(Dir, "out.log");
@@ -421,6 +425,44 @@ namespace MPFever
             File.WriteAllText(outPath, "");
             poll = new Thread(Poll) { IsBackground = true, Name = "GameLink " + name };
             poll.Start();
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern int GetShortPathNameW(string longPath, StringBuilder shortPath, int size);
+
+        static bool IsAscii(string s) => s.All(c => c < 128);
+
+        /// <summary>Folder of the session folders. The game's Lua cannot open a path with letters outside ASCII: with a
+        /// Windows account named "Thöny" (the temporary folder is in the account's folder) no file of the session could be
+        /// read or written by the mod, and the game had no multiplayer page (issue #59). Such a temporary folder is used by
+        /// its short name (C:\Users\MAXEMI~1\...), or else replaced by an ASCII folder shared by the PC's accounts.</summary>
+        static string SessionRoot()
+        {
+            var temp = Path.Combine(Path.GetTempPath(), "mpfever");
+            if (IsAscii(temp)) return temp;
+            try
+            {
+                Directory.CreateDirectory(temp);
+                var sb = new StringBuilder(1024);
+                int n = GetShortPathNameW(temp, sb, sb.Capacity);
+                if (n > 0 && n < sb.Capacity && IsAscii(sb.ToString())) return sb.ToString();
+            }
+            catch { }
+            foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), Environment.GetEnvironmentVariable("PUBLIC") })
+            {
+                if (string.IsNullOrEmpty(root) || !IsAscii(root)) continue;
+                try
+                {
+                    var dir = Path.Combine(root, "MPFever", "sessions");
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllText(Path.Combine(dir, "write_test.txt"), "");
+                    File.Delete(Path.Combine(dir, "write_test.txt"));
+                    return dir;
+                }
+                catch { }
+            }
+            Log.Warn(L.T("Le dossier temporaire contient des lettres que le jeu ne sait pas lire : le mod risque de ne pas fonctionner (", "The temporary folder has letters the game cannot read: the mod may not work (") + temp + ")");
+            return temp;
         }
 
         public bool GameRunning => proc != null && !proc.HasExited;
@@ -563,6 +605,9 @@ namespace MPFever
             psi.EnvironmentVariables["MPFEVER_NAME"] = Name;
             psi.EnvironmentVariables["MPFEVER_ROLE"] = Role;
             psi.EnvironmentVariables["MPFEVER_LANG"] = L.Code;
+            // the native module's places by signature, for a game build it does not know (made by tools/mksigs.py)
+            var sigs = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mpfever_sigs.txt");
+            if (File.Exists(sigs)) psi.EnvironmentVariables["MPFEVER_SIGS"] = sigs;
             if (Server) psi.EnvironmentVariables["MPFEVER_SERVER"] = "1";
             WriteLang();
             // application script: starts the host's savegame after a resynchronisation (and loads the autotest save)
@@ -595,8 +640,27 @@ namespace MPFever
                     }
                     catch (Exception e) { Log.Warn(L.F("[{0}] lecture {1} : {2}", "[{0}] reading {1}: {2}", Name, Path.GetFileName(src.Path), e.Message)); Thread.Sleep(500); }
                 }
+                LogMemory();
                 Thread.Sleep(5);
             }
+        }
+
+        DateTime memAt = DateTime.MinValue;
+        /// <summary>Every 5 minutes, the game's memory in the launcher's log: the frame rate of a long session fell by
+        /// three quarters after the fifth resynchronisation (two games on one PC, issue #50), each reload of a 165 MB
+        /// savegame may keep some of the game's memory.</summary>
+        void LogMemory()
+        {
+            if ((DateTime.UtcNow - memAt).TotalMinutes < 5) return;
+            memAt = DateTime.UtcNow;
+            try
+            {
+                if (proc == null || proc.HasExited) return;
+                proc.Refresh();
+                Log.W(L.F("[{0}] mémoire du jeu : {1} Mo privés, {2} Mo en mémoire vive (pointe {3} Mo)", "[{0}] game memory: {1} MB private, {2} MB in RAM (peak {3} MB)",
+                    Name, proc.PrivateMemorySize64 >> 20, proc.WorkingSet64 >> 20, proc.PeakWorkingSet64 >> 20));
+            }
+            catch { }
         }
 
         sealed class Tail
@@ -704,6 +768,7 @@ namespace MPFever
                 {
                     var c = listener.AcceptTcpClient();
                     c.NoDelay = true;
+                    NetAddr.KeepAlive(c);
                     var p = new Peer { Id = nextId++, Tcp = c, Writer = new StreamWriter(c.GetStream(), new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true } };
                     p.Name = "Player" + p.Id;
                     try { p.Address = c.Client.RemoteEndPoint?.ToString(); } catch { }
@@ -850,6 +915,7 @@ namespace MPFever
                     var task = c.ConnectAsync(ep.Address, ep.Port);
                     if (!task.Wait(TimeSpan.FromSeconds(targets.Count > 1 ? 8 : 20))) throw new TimeoutException(L.T("pas de réponse", "no answer"));
                     tcp = c;
+                    NetAddr.KeepAlive(c);
                     used = ep;
                     break;
                 }
@@ -915,6 +981,23 @@ namespace MPFever
     /// port), "name:28090", several separated by commas.</summary>
     static class NetAddr
     {
+        /// <summary>TCP keepalive after 15 s of silence, every 3 s: a connection that died without a word (a router, a lost
+        /// Wi-Fi) is noticed within about half a minute instead of hours. Issue #60: the host kept a player's dead connection
+        /// until the player came back on a new one.</summary>
+        public static void KeepAlive(TcpClient c)
+        {
+            try
+            {
+                c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                var v = new byte[12];
+                BitConverter.GetBytes(1u).CopyTo(v, 0);
+                BitConverter.GetBytes(15000u).CopyTo(v, 4);
+                BitConverter.GetBytes(3000u).CopyTo(v, 8);
+                c.Client.IOControl(IOControlCode.KeepAliveValues, v, null);
+            }
+            catch (Exception e) { Log.W("keepalive: " + e.Message); }
+        }
+
         public static List<KeyValuePair<string, int>> Parse(string spec, int defaultPort)
         {
             var res = new List<KeyValuePair<string, int>>();
@@ -1124,8 +1207,22 @@ namespace MPFever
 
         public static string SteamPath()
         {
-            try { return (Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string)?.Replace('/', Path.DirectorySeparatorChar); }
-            catch { return null; }
+            // The user's SteamPath can be stale (Steam reinstalled elsewhere: it still named the old folder, where only a
+            // library was left, so the mod went nowhere and no savegame was found): the first of these that holds steam.exe,
+            // then the running Steam's folder
+            var cands = new List<string>();
+            try { cands.Add(Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string); } catch { }
+            try { cands.Add(Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string); } catch { }
+            try { cands.Add(Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam", "InstallPath", null) as string); } catch { }
+            try { cands.Add(Path.GetDirectoryName(Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamExe", null) as string ?? "")); } catch { }
+            try { foreach (var p in System.Diagnostics.Process.GetProcessesByName("steam")) try { cands.Add(Path.GetDirectoryName(p.MainModule.FileName)); } catch { } } catch { }
+            foreach (var c in cands)
+            {
+                if (string.IsNullOrEmpty(c)) continue;
+                var d = c.Replace('/', Path.DirectorySeparatorChar);
+                try { if (File.Exists(Path.Combine(d, "steam.exe")) && Directory.Exists(Path.Combine(d, "userdata"))) return d; } catch { }
+            }
+            return cands.FirstOrDefault(c => !string.IsNullOrEmpty(c))?.Replace('/', Path.DirectorySeparatorChar);
         }
 
         static IEnumerable<string> SteamLibraries()

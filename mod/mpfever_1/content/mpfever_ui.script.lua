@@ -83,6 +83,14 @@ local function install()
 			if os.getenv("MPFEVER_NONOTIF") then return end
 			return O.sendCommand(cmd, cb, progress)
 		end
+		-- town development at a position: the engine seeds it from the C library's rand(), seeded with the clock, so every
+		-- game would develop the town differently (found by TPF3-MP, investigation/TPF3_RNG_2026-09-29.md). No stock script
+		-- sends it; a mod's is refused in a session
+		if tag.name == "makeTownDevelopAtCmd" then
+			U.townDevRefused = (U.townDevRefused or 0) + 1
+			if U.townDevRefused <= 5 then log("makeTownDevelopAtCmd refused in a session (its random numbers differ on every game)") end
+			return
+		end
 		if tag.name == "makeGameSetSpeedCmd" then
 			U.stats.speed = U.stats.speed + 1
 			-- the interface repeats its request every frame while the game holds another speed: one per second at most
@@ -169,7 +177,11 @@ local function patchGameModules()
 	CO.patchProgression(req, function(entity)
 		if U.coMap and U.coMap[entity] and U.canon then return U.canon end
 		return nil
-	end, log)
+	end, log, function(entity)
+		-- (each company's own rank, written by the bridge into companies.txt when there is more than one company)
+		local id = U.coMap and U.coMap[entity]
+		return id and U.ranks and U.ranks[id] or nil
+	end)
 	CO.patchPermits(req, log)
 end
 local function pollCompanies()
@@ -179,8 +191,10 @@ local function pollCompanies()
 	f:close()
 	if txt == U.coTxt then return end
 	U.coTxt = txt
-	local map, names = {}, {}
+	local map, names, ranks, nRanks = {}, {}, {}, 0
 	for line in txt:gmatch("[^" .. C.NL .. "]+") do
+		local rid, rx, rl, rp = line:match("^rank" .. C.TAB .. "(%d+)" .. C.TAB .. "([%d%.%-]+)" .. C.TAB .. "(%d+)" .. C.TAB .. "(%d+)")
+		if rid then ranks[tonumber(rid)] = { experience = tonumber(rx), level = tonumber(rl), potentialLevel = tonumber(rp) }; nRanks = nRanks + 1 end
 		local a, b, n = line:match("^(%d+)" .. C.TAB .. "(%d+)" .. C.TAB .. "?([^" .. C.TAB .. "]*)")
 		if a then map[tonumber(b)] = tonumber(a); names[tonumber(b)] = n end
 		local me = line:match("^me" .. C.TAB .. "(%d+)")
@@ -188,6 +202,7 @@ local function pollCompanies()
 	end
 	U.coMap = map
 	U.coNames = names
+	U.ranks = nRanks > 1 and ranks or nil
 	for e, id in pairs(map) do if id == 1 then U.canon = e end end
 	if U.canon and not U.coPatched then
 		U.coPatched = true
@@ -681,11 +696,39 @@ local function requestInvite()
 	f:close()
 end
 
+-- "Report a problem": MPFever.exe puts the logs into a zip and opens a new GitHub issue (see Reporter.cs); it says where
+-- the zip is in report.txt, shown under the button
+local function requestReport()
+	U.reqSeq = (U.reqSeq or 0) + 1
+	local f = C.IO.open(C.DIR .. C.BS .. "menu_req.txt", "wb")
+	if not f then log("session: cannot write menu_req.txt") return end
+	f:write(tostring(os.time()) .. ".ui" .. U.reqSeq .. C.TAB .. "report" .. C.TAB .. C.TAB .. (C.NAME or "") .. C.TAB .. C.NL)
+	f:close()
+	U.reportAsked = os.time()
+	U.reportMsg = T("Rapport en préparation…", "Preparing the report…")
+	U.statusVersion = (U.statusVersion or 0) + 1
+end
+
+-- the answer of MPFever.exe to the last report asked (report.txt: "<ticks> TAB <text>")
+local function pollReport()
+	if not U.reportAsked or os.time() - U.reportAsked > 120 then return end
+	local f = C.IO.open(C.DIR .. C.BS .. "report.txt", "rb")
+	if not f then return end
+	local line = f:read("*l")
+	f:close()
+	local text = line and line:match("^%d+\t(.*)$")
+	if text and text ~= U.reportMsg then
+		U.reportMsg = text
+		U.statusVersion = (U.statusVersion or 0) + 1
+	end
+end
+
 -- re-renders its recipe when the status changes, and once more when it gets old
 local function useStatus(react)
 	local key = function() return tostring(U.statusVersion or 0) .. (statusStale(U.status) and "s" or "") end
 	local ver = react.useState(key())
 	react.onStepTimer(function()
+		pcall(pollReport)
 		local k = key()
 		if ver:old() ~= k then ver:set(k) end
 	end, 0.5)
@@ -898,7 +941,51 @@ local function installSession(react, builtin)
 	-- MPFever's window: stays open while playing, can be moved and closed
 	U.SessionWindow = react.RegisterWrapperRecipe("MPFeverSessionWindow", builtin.Window, function(wp)
 		local st = useStatus(react)
+		-- reduced to one small card (issue #68): the sync, the players and the chat, kept for the session
+		local small = react.useState(U.sessionSmall == true)
+		-- its width, adjustable by steps (the game's windows cannot be resized with the mouse), kept for the session
+		-- (every state before the reduced card's early return: the same hooks on every render)
+		local width = react.useState(U.sessionWidth or 540)
+		local function toggle()
+			U.sessionSmall = not small:old()
+			small:set(U.sessionSmall)
+		end
+		if small:old() then
+			local sync, syncCls = syncLine(st)
+			local link, linkCls = linkLine(st)
+			local mini = {}
+			if link and linkCls ~= "success" then mini[#mini + 1] = row { dot(linkCls), text("  " .. link, nil, linkCls) } end
+			mini[#mini + 1] = row { dot(syncCls), text("  " .. sync, nil, syncCls) }
+			mini[#mini + 1] = row { icon(ICON_PLAYERS, 22), text("  " .. T("Joueurs", "Players") .. "  (" .. playerCount(st) .. ")") }
+			mini[#mini + 1] = row {
+				builtin.Button { meta = { class = "secondary" }, content = icon(ICON_CHAT, 22), onClick = function() if U.openChat then U.openChat() end end },
+				text("  "),
+				builtin.Button { meta = { class = "secondary" }, content = text(T("Agrandir", "Expand")), onClick = toggle },
+			}
+			return builtin.Window {
+				title = "MPFever",
+				id = "window.mpfever.session",
+				initialX = 0.98,
+				initialY = 0.12,
+				movable = true,
+				closable = true,
+				onClose = wp.onClose,
+				content = builtin.Component { meta = { styleSheet = style { size = { 280, -1 } } }, layout = builtin.BoxLayout { orientation = V, children = mini } },
+			}
+		end
 		local rows = {}
+		local function widen(d)
+			local w = math.max(400, math.min(900, width:old() + d))
+			U.sessionWidth = w
+			width:set(w)
+		end
+		rows[#rows + 1] = row {
+			builtin.Button { meta = { class = "secondary" }, content = text(T("Réduire", "Reduce")), onClick = toggle },
+			text("  "),
+			builtin.Button { meta = { class = "secondary", tooltip = T("Plus étroite", "Narrower") }, content = text("  -  "), onClick = function() widen(-80) end },
+			text(" "),
+			builtin.Button { meta = { class = "secondary", tooltip = T("Plus large", "Wider") }, content = text("  +  "), onClick = function() widen(80) end },
+		}
 		if st and st.host then
 			-- (a dedicated server: its name as its settings write it)
 			local hostText = st.server == "1" and C.Tf("Serveur dédié : %s", "Dedicated server: %s", (st.title and st.title ~= "") and st.title or st.host)
@@ -933,6 +1020,9 @@ local function installSession(react, builtin)
 		rows[#rows + 1] = text(" ")
 		rows[#rows + 1] = builtin.Button { meta = { class = "secondary" }, content = row { icon(ICON_CHAT, 22), text("  " .. T("Ouvrir la discussion", "Open the chat")) },
 			onClick = function() if U.openChat then U.openChat() end end }
+		rows[#rows + 1] = text(" ")
+		rows[#rows + 1] = builtin.Button { meta = { class = "secondary" }, content = text(T("Signaler un problème (journaux)", "Report a problem (logs)")), onClick = requestReport }
+		if U.reportMsg and U.reportAsked and os.time() - U.reportAsked <= 120 then rows[#rows + 1] = muted(U.reportMsg) end
 		return builtin.Window {
 			title = "MPFever – " .. T("Multijoueur", "Multiplayer"),
 			id = "window.mpfever.session",
@@ -942,7 +1032,8 @@ local function installSession(react, builtin)
 			closable = true,
 			onClose = wp.onClose,
 			-- wide enough for the title and the longest lines (the window takes its content's size)
-			content = builtin.Component { meta = { styleSheet = style { size = { 540, -1 } } }, layout = builtin.BoxLayout { orientation = V, children = rows } },
+			pinnable = true,
+			content = builtin.Component { meta = { styleSheet = style { size = { width:old(), -1 } } }, layout = builtin.BoxLayout { orientation = V, children = rows } },
 		}
 	end)
 
@@ -1289,8 +1380,16 @@ local function pollBindings()
 		for line in chunk:gmatch("([^" .. C.NL .. "]*)" .. C.NL) do
 			consumed = consumed + #line + 1
 			local key, e = line:match("^(%S+) (%-?%d+)")
-			if key == "RESET" then U.rev = {}
-			elseif key then U.rev[tonumber(e)] = key end
+			if key == "RESET" then U.rev = {}; U.byKey = {}
+			elseif key then
+				-- (a key bound again: the entity it named before loses it, issue #53)
+				local n = tonumber(e)
+				U.byKey = U.byKey or {}
+				local old = U.byKey[key]
+				if old and old ~= n and U.rev[old] == key then U.rev[old] = nil end
+				U.byKey[key] = n
+				U.rev[n] = key
+			end
 		end
 		U.bindOff = U.bindOff + consumed
 	end
